@@ -60,4 +60,5 @@ class AttemptCompletionTool:
         if ip.lower() == "y":
             return {"user_satisfied": True, "content": result}
         else:
-            return {"user_satisfied": False, "content": result}
+            ip = input("Give Feedback: ")
+            return {"user_satisfied": False, "content": result + "\n\nFeedback: " + ip}
