@@ -65,7 +65,8 @@ class Agent:
             print(f"Tool Response: {tool_response}")
             self.history.append(tool_response)
             prompt = "\n".join(self.history) + "\n" + tool_response
-
+            
+            print("\n\n"+ "="*50 + "\n\n")
             if is_task_completed:
                 print("Task completed!")
                 print("Exiting...")
