@@ -52,9 +52,12 @@ class Agent:
 
                     if content_block["tool"] == "attempt_completion":
                         tr = self.invoke_tool(content_block)
-                        if tr["user_satisfied"]:
-                            is_task_completed = True
-                        tool_response += tr["content"] + "\n\n"
+                        if type(tr) == dict:
+                            if tr["user_satisfied"]:
+                                is_task_completed = True
+                            tool_response += tr["content"] + "\n\n"
+                        else:
+                            tool_response += tr + "\n\n"
                         break
                     else:
                         tool_response += self.invoke_tool(content_block) + "\n\n"
