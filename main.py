@@ -8,11 +8,11 @@ llm = ChatOpenAI(model="gpt-4o-mini")
 
 ag = Agent(
     llm,
-    working_directory="/mnt/d/AI/SuperAgent",
+    working_directory="/mnt/d/AI/SuperAgentDash",
 )
 
 query = """
-Write comments in the code of SuperAgent written in directory /mnt/d/AI/SuperAgent
+Write comments in the code of SuperAgent written in directory /mnt/d/AI/SuperAgentDash
 """
 
-ag.invoke(query)
+# Invoke the Agent with the specified queryag.invoke(query)
