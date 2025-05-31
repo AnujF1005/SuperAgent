@@ -195,5 +195,5 @@ class ReplaceInFileTool:
         
         return content
     
-    def __call__(self, path: str, updates: str):
-        return self.__update_file(path, updates)
+    def __call__(self, path: str, diff: str):
+        return self.__update_file(path, diff)
