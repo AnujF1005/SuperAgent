@@ -1,7 +1,7 @@
 from tools import TOOLS_DICT
 
 class PromptManager:
-    def __init__(self, os, shell, home_directory, current_working_directory):
+    def __init__(self, os, shell, current_working_directory):
         self.os = os
         self.shell = shell
         self.current_working_directory = current_working_directory
