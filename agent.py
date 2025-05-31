@@ -13,8 +13,8 @@ class Agent:
         self.history = []
     
     def invoke_tool(self, tool_call: dict):
-        tool_name = tool_call.tool
-        params = tool_call.params
+        tool_name = tool_call["tool"]
+        params = tool_call["params"]
 
         tool_executable = TOOLS_DICT[tool_name]()
 
