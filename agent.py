@@ -1,6 +1,7 @@
 from response_parser import ContentType, parse_ai_response
 from tools import TOOLS_DICT
 from prompt import PromptManager
+import os
 
 class Agent:
     def __init__(self, llm, working_directory):
@@ -11,6 +12,8 @@ class Agent:
             current_working_directory=working_directory,
         )
         self.history = []
+        # Change working directory
+        os.system(f"cd {working_directory}")
     
     def invoke_tool(self, tool_call: dict):
         tool_name = tool_call["tool"]

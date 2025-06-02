@@ -7,8 +7,6 @@ import os
 load_dotenv("../.env")
 
 def invoke_agent(task, working_dir):
-    # Change working directory
-    os.system(f"cd {working_dir}")
     
     llm = ChatOpenAI(model="gpt-4o-mini")
 
