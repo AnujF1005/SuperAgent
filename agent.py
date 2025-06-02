@@ -16,7 +16,7 @@ class Agent:
         # Start persistent visible terminal
         self.terminal_session = TerminalSession(working_directory)
         # Change working directory as before
-        os.system(f"cd {working_directory}")
+        os.chdir(working_directory)
     
     def cleanup(self):
         if hasattr(self, "terminal_session") and self.terminal_session:
