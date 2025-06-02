@@ -1,4 +1,3 @@
-import subprocess
 
 class ShellTool:
     name = "shell"
@@ -28,10 +27,14 @@ class ShellTool:
     </shell>
     """
 
-    def __call__(self, command: str, requires_approval: str):
+    # terminal_session must be injected by the Agent at call time!
+    def __call__(self, command: str, requires_approval: str, terminal_session=None):
         if requires_approval.lower() == "true":
             ip = input(f"Approval required (y/n) for executing following command:\n{command}\n>> ")
             if ip.lower() == "n":
                 return f"User denied request to exeute command: {command}"
-        result = subprocess.run(command, shell=True, capture_output=True, text=True)
-        return f"Command return code: {result.returncode}\n\nStdout:\n{result.stdout}"
+        if terminal_session is None:
+            return "[SuperAgent] ERROR: No terminal_session provided to ShellTool (this is a coding bug)."
+
+        output = terminal_session.send_command_and_capture(command)
+        return f"Stdout/Stderr:\n{output}"

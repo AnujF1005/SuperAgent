@@ -155,6 +155,7 @@ class PromptManager:
 
         RULES
 
+        - Always use `ask_user` tool when you need any inputs from user. Don't just ask the question, always use `ask_user` tool.
         - Your current working directory is: {self.current_working_directory}
         - You cannot `cd` into a different directory to complete a task. You are stuck operating from '{self.current_working_directory}', so be sure to pass in the correct 'path' parameter when using tools that require a path.
         - Do not use the ~ character or $HOME to refer to the home directory.

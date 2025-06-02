@@ -15,7 +15,10 @@ def invoke_agent(task, working_dir):
         working_directory=working_dir,
     )
 
-    ag.invoke(task)
+    try:
+        ag.invoke(task)
+    finally:
+        ag.cleanup()
 
 if __name__=="__main__":
     parser = argparse.ArgumentParser(description="Agent Runner")

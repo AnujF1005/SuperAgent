@@ -1,5 +1,6 @@
 from response_parser import ContentType, parse_ai_response
 from tools import TOOLS_DICT
+from tools.terminal_session import TerminalSession
 from prompt import PromptManager
 import os
 
@@ -12,14 +13,24 @@ class Agent:
             current_working_directory=working_directory,
         )
         self.history = []
-        # Change working directory
+        # Start persistent visible terminal
+        self.terminal_session = TerminalSession(working_directory)
+        # Change working directory as before
         os.system(f"cd {working_directory}")
     
+    def cleanup(self):
+        if hasattr(self, "terminal_session") and self.terminal_session:
+            self.terminal_session.cleanup()
+            self.terminal_session = None
+
     def invoke_tool(self, tool_call: dict):
         tool_name = tool_call["tool"]
         params = tool_call["params"]
 
         tool_executable = TOOLS_DICT[tool_name]()
+        # Inject terminal_session for shell tool
+        if tool_name == "shell":
+            return tool_executable(**params, terminal_session=self.terminal_session)
 
         if set(tool_executable.params) != set(params.keys()):
             return "Missing or extra parameter for tool: " + tool_name
@@ -65,6 +76,11 @@ class Agent:
                     else:
                         tool_response += self.invoke_tool(content_block) + "\n\n"
             
+            # Empty tool_response
+            if "" == tool_response.strip():
+                print("Empty tool response!!!")
+                tool_response = input("User: ")
+
             print(f"Tool Response: {tool_response}")
             self.history.append(tool_response)
             prompt = "\n".join(self.history) + "\n" + tool_response
