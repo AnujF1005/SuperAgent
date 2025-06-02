@@ -26,5 +26,5 @@ class SearchTool:
             topic="general"
         )
 
-    def run(self, query: str):
-        return self.search_engine(query)
+    def __call__(self, query: str):
+        return self.search_engine(query)["results"]
