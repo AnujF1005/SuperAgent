@@ -12,7 +12,10 @@ import os # Added import for environment variable access
 
 class BrowserTool:
     name = "browser_actions"
-    params = ["query", "url"]
+    params = {
+        "optional": ["query", "url"],
+        "required": [],
+    }
     description = """
     Request to launch a browser to perform one of two actions:
     1. Search a query on a search engine, navigate to the first result, and extract its text content.

@@ -1,6 +1,9 @@
 class AskUserTool:
     name = "ask_user"
-    params = ["question"]
+    params = {
+        "required": ["question"],
+        "optional": []
+    }
     description = """
     Ask the user a question to gather additional information needed to complete the task. This tool should be used when you encounter ambiguities, need clarification, or require more details to proceed effectively. It allows for interactive problem-solving by enabling direct communication with the user. Use this tool judiciously to maintain a balance between gathering necessary information and avoiding excessive back-and-forth.
     Parameters:
@@ -25,7 +28,10 @@ class AskUserTool:
     
 class AttemptCompletionTool:
     name = "attempt_completion"
-    params = ["result"]
+    params = {
+        "required": ["result"],
+        "optional": []
+    }
     description = """
     After each tool use, the user will respond with the result of that tool use, i.e. if it succeeded or failed, along with any reasons for failure. Once you've received the results of tool uses and can confirm that the task is complete, use this tool to present the result of your work to the user. Optionally you may provide a CLI command to showcase the result of your work. The user may respond with feedback if they are not satisfied with the result, which you can use to make improvements and try again.
     IMPORTANT NOTE: This tool CANNOT be used until you've confirmed from the user that any previous tool uses were successful. Failure to do so will result in code corruption and system failure. Before using this tool, you must ask yourself in <thinking></thinking> tags if you've confirmed from the user that any previous tool uses were successful. If not, then DO NOT use this tool.

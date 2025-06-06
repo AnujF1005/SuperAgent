@@ -51,6 +51,7 @@ class Agent:
     def invoke_tool(self, tool_call: dict):
         tool_name = tool_call["tool"]
         params = tool_call["params"]
+        params_list = list(params.keys())
 
         if tool_name not in self.tool_instances:
             return f"Tool '{tool_name}' not found."
@@ -64,18 +65,10 @@ class Agent:
             return tool_executable(**params, terminal_session=self.terminal_session)
 
         # Validate parameters - this check is against the class definition's params
-        # For instantiated tools, we might need to access a 'params' attribute if it's consistently defined
-        # Or assume the tool's __call__ method handles param validation.
-        # For now, let's assume 'params' is an attribute on the instance or class.
-        expected_params = getattr(tool_executable, 'params', []) 
-        if set(expected_params) != set(params.keys()):
-            # Allow for optional params if not all expected_params are in params.keys()
-            # This check needs to be more robust if tools have optional params.
-            # A simple check for now:
-            if not all(p in expected_params for p in params.keys()):
-                 return f"Missing or extra parameter for tool: {tool_name}. Expected: {expected_params}, Got: {list(params.keys())}"
-            # If all provided params are in expected_params, but not all expected_params are provided,
-            # it implies optional parameters. This part of logic might need adjustment based on tool design.
+        expected_params = TOOLS_DICT[tool_name].params["required"] if hasattr(TOOLS_DICT[tool_name], 'params') else []
+
+        if not all(p in params_list for p in expected_params):
+            return f"Missing or extra parameter for tool: {tool_name}. Expected: {expected_params}, Got: {params_list}"
 
         return tool_executable(**params)
 

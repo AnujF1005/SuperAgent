@@ -3,7 +3,10 @@ import re
 
 class WriteToFileTool:
     name = "write_to_file"
-    params = ["path", "contents"]
+    params = {
+        "required": ["path", "contents"],
+        "optional": []
+    }
     description = """
     Request to write content to a file at the specified path. If the file exists, it will be overwritten with the provided content. If the file doesn't exist, it will be created. This tool will automatically create any directories needed to write the file.
     Parameters:
@@ -49,7 +52,10 @@ class WriteToFileTool:
 
 class ReadFileTool:
     name = "read_file"
-    params = ["path"]
+    params = {
+        "required": ["path"],
+        "optional": []
+    }
     description = """
     Request to read the contents of a file at the specified path. Use this when you need to examine the contents of an existing file you do not know the contents of, for example to analyze code, review text files, or extract information from configuration files. Automatically extracts raw text from PDF and DOCX files. May not be suitable for other types of binary files, as it returns the raw content as a string.
     Parameters:
@@ -75,7 +81,10 @@ class ReadFileTool:
 
 class ReplaceInFileTool:
     name = "replace_in_file"
-    params = ["path", "diff"]
+    params = {
+        "required": ["path", "diff"],
+        "optional": []
+    }
     description = """
     Request to replace sections of content in an existing file using SEARCH/REPLACE blocks that define exact changes to specific parts of the file. This tool should be used when you need to make targeted changes to specific parts of a file.
     Parameters:
