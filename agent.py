@@ -1,6 +1,5 @@
 from response_parser import ContentType, parse_ai_response
 from tools import TOOLS_DICT
-from tools.browser import SearchTool # Added import
 from tools.terminal_session import TerminalSession
 from prompt import PromptManager
 import os

@@ -10,125 +10,142 @@ from webdriver_manager.chrome import ChromeDriverManager
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
 import os # Added import for environment variable access
 
-class SearchTool:
-    name = "browser_search"
-    params = ["query"]
+class BrowserTool:
+    name = "browser_actions"
+    params = ["query", "url"]
     description = """
-    Request to launch a browser, search a query on Google, navigate to the first search result,
-    and extract the text content from that page.
+    Request to launch a browser to perform one of two actions:
+    1. Search a query on a search engine, navigate to the first result, and extract its text content.
+    2. Directly open a specified URL and extract its text content.
+
+    Provide EITHER 'query' OR 'url', but not both.
     Parameters:
-    - query: (required) The query to search on Google.
-    Usage:
-    <browser_search>
+    - query: (optional) The query to search on a search engine.
+    - url: (optional) The exact URL to open directly.
+    Usage for search:
+    <browser_actions>
     <query>what is selenium</query>
-    </browser_search>
+    </browser_actions>
+
+    Usage for opening a URL:
+    <browser_actions>
+    <url>https://www.example.com</url>
+    </browser_actions>
     """
     examples = """
     Requesting to find information about Python:
-
-    <browser_search>
+    <browser_actions>
     <query>official python documentation</query>
-    </browser_search>
+    </browser_actions>
+
+    Requesting to open a specific webpage:
+    <browser_actions>
+    <url>https://www.selenium.dev/documentation/</url>
+    </browser_actions>
     """
 
     def __init__(self):
         self.driver = None
         try:
             options = webdriver.ChromeOptions()
-            # options.add_argument('--headless')  # Run in headless mode - Commented out for visible browser
+            # options.add_argument('--headless') # Run in headless mode
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--disable-gpu') # Optional, recommended for headless
             
-            # Check for custom Chrome binary path
             chrome_binary_path = os.environ.get('CHROME_BINARY_PATH')
             if chrome_binary_path:
                 options.binary_location = chrome_binary_path
             
-            # Automatically download and manage ChromeDriver
             service = ChromeService(ChromeDriverManager().install())
             self.driver = webdriver.Chrome(service=service, options=options)
         except WebDriverException as e:
             print(f"Error initializing WebDriver: {e}")
             print("Please ensure Chrome is installed and ChromeDriver is compatible or accessible.")
-            # self.driver will remain None, and __call__ will handle this
         except Exception as e:
             print(f"An unexpected error occurred during WebDriver initialization: {e}")
-            # self.driver will remain None
 
-    def __call__(self, query: str):
+    def _extract_page_content(self, current_url: str):
+        """Helper function to extract and limit page content."""
+        WebDriverWait(self.driver, 15).until(
+            EC.presence_of_element_located((By.TAG_NAME, "body"))
+        )
+        time.sleep(2) # Allow dynamic content to load
+        body_element = self.driver.find_element(By.TAG_NAME, "body")
+        page_text = body_element.text
+        return page_text
+
+    def __call__(self, query: str = None, url: str = None):
         if not self.driver:
-            return "WebDriver not initialized. Cannot perform search."
+            return "WebDriver not initialized. Cannot perform browser actions."
+
+        if url and query:
+            return "Error: Provide either 'url' or 'query', not both."
+        if not url and not query:
+            return "Error: Provide either 'url' or 'query'."
 
         try:
-            # 1. Navigate to duckduckgo instead of Google to avoid potential issues with Google's captcha or restrictions
-            self.driver.get("https://www.duckduckgo.com")
+            if url:
+                # Action: Open URL directly
+                self.driver.get(url)
+                page_text = self._extract_page_content(current_url=url)
+                return f"Successfully opened URL '{url}' and extracted content: {page_text}"
 
-            # 2. Find search bar, enter query, and submit
-            search_bar = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.NAME, "q"))
-            )
-            search_bar.clear()
-            search_bar.send_keys(query)
-            search_bar.send_keys(Keys.RETURN)
-
-            # 3. Wait for search results and find the first organic result link
-            # Google's(or any other search engine's) structure can change, this selector targets common patterns for organic results
-            # It looks for an h3 inside an anchor tag, within a div that typically holds a search result.
-            first_result_selector = (
-                "//div[@id='search']//div[contains(@class, 'g ')]//a[h3]"  # Common structure
-            )
-            
-            try:
-                first_result_link_element = WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.XPATH, first_result_selector))
+            elif query:
+                # Action: Perform search
+                self.driver.get("https://www.duckduckgo.com")
+                search_bar = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.NAME, "q"))
                 )
-            except TimeoutException:
-                 # Fallback selector if the primary one fails
-                first_result_selector_fallback = "//div[contains(@class,'g')]//a[@href and h3]"
+                search_bar.clear()
+                search_bar.send_keys(query)
+                search_bar.send_keys(Keys.RETURN)
+
+                first_result_selector = (
+                    "//div[@id='links']//a[contains(@class, 'result__a')]" # DuckDuckGo specific selector
+                )
+                # Fallback, more generic, might be less reliable
+                first_result_selector_fallback = "//a[h2]"
+
+
                 try:
+                    # Try DuckDuckGo specific selector first
                     first_result_link_element = WebDriverWait(self.driver, 10).until(
-                        EC.presence_of_element_located((By.XPATH, first_result_selector_fallback))
+                        EC.presence_of_element_located((By.XPATH, first_result_selector))
                     )
                 except TimeoutException:
-                    return f"Could not find the first search result link for query: '{query}' on Google."
+                    # Fallback selector if the primary one fails
+                    try:
+                        first_result_link_element = WebDriverWait(self.driver, 10).until(
+                            EC.presence_of_element_located((By.XPATH, first_result_selector_fallback))
+                        )
+                    except TimeoutException:
+                        return f"Could not find the first search result link for query: '{query}'."
+                
+                first_result_url = first_result_link_element.get_attribute("href")
+                if not first_result_url:
+                    return f"Found first result element, but it has no URL for query: '{query}'"
 
-
-            first_result_url = first_result_link_element.get_attribute("href")
-
-            if not first_result_url:
-                return f"Found first result element, but it has no URL for query: '{query}'"
-
-            # 4. Navigate to the first result URL
-            self.driver.get(first_result_url)
-
-            # 5. Wait for page to load and extract text content
-            # Wait for body tag to be present
-            WebDriverWait(self.driver, 15).until(
-                EC.presence_of_element_located((By.TAG_NAME, "body"))
-            )
-            # A small delay to let dynamic content load, if any.
-            # For more complex pages, more sophisticated waits might be needed.
-            time.sleep(2) 
-            
-            body_element = self.driver.find_element(By.TAG_NAME, "body")
-            page_text = body_element.text
-
-            # Limit the amount of text returned to keep it manageable
-            max_chars = 2000
-            if len(page_text) > max_chars:
-                page_text = page_text[:max_chars] + "..."
-            
-            return f"Successfully searched for '{query}', navigated to '{first_result_url}', and extracted content: {page_text}"
+                self.driver.get(first_result_url)
+                page_text = self._extract_page_content(current_url=first_result_url)
+                return f"Successfully searched for '{query}', navigated to '{first_result_url}', and extracted content: {page_text}"
 
         except TimeoutException:
-            return f"Timeout while trying to perform search or navigate for query: '{query}'"
+            action = "opening URL" if url else "performing search"
+            target = url if url else query
+            return f"Timeout while {action} '{target}'"
         except NoSuchElementException:
-            return f"Could not find a required element (e.g., search bar, result link) for query: '{query}'"
+            action = "opening URL" if url else "performing search"
+            target = url if url else query
+            return f"Could not find a required element during {action} for '{target}'"
         except WebDriverException as e:
-            return f"WebDriver error during search for '{query}': {str(e)}"
+            action = "opening URL" if url else "performing search"
+            target = url if url else query
+            return f"WebDriver error during {action} for '{target}': {str(e)}"
         except Exception as e:
-            return f"An unexpected error occurred during browser operation for query '{query}': {str(e)}"
+            action = "opening URL" if url else "performing search"
+            target = url if url else query
+            return f"An unexpected error occurred during browser operation for '{target}': {str(e)}"
 
     def quit_driver(self):
         if self.driver:
