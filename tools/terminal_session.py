@@ -7,7 +7,7 @@ import uuid
 class TerminalSession:
     def __init__(self, working_directory):
         self.session_name = f"superagent_{os.getpid()}_{uuid.uuid4().hex[:8]}"
-        self.working_directory = working_directory
+        self.working_directory = os.path.abspath(working_directory)
 
         if subprocess.run("which tmux", shell=True, capture_output=True, text=True).returncode != 0:
             raise EnvironmentError("tmux is required for agent's shell functionality but not found. Please install tmux: sudo apt install tmux")

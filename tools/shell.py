@@ -1,4 +1,3 @@
-
 class ShellTool:
     name = "shell"
     params = ["command", "requires_approval"]
@@ -35,6 +34,32 @@ class ShellTool:
                 return f"User denied request to exeute command: {command}"
         if terminal_session is None:
             return "[SuperAgent] ERROR: No terminal_session provided to ShellTool (this is a coding bug)."
+
+        # Get the working directory from the terminal_session
+        working_directory = getattr(terminal_session, "working_directory", None)
+
+        # Determine if the command should be run as-is or wrapped with cd <dir> &&
+        def command_has_absolute_path(cmd):
+            import shlex
+            try:
+                tokens = shlex.split(cmd)
+            except Exception:
+                tokens = cmd.strip().split()
+            if not tokens:
+                return False
+            first_token = tokens[0]
+            # If explicitly starting with 'cd', user is setting directory: do not wrap
+            if first_token == "cd":
+                return True
+            # If any argument starts with / or ~, count as absolute
+            for t in tokens:
+                if t.startswith('/') or t.startswith('~'):
+                    return True
+            return False
+
+        # Prepend cd working_directory && ... if appropriate
+        if working_directory is not None and not command_has_absolute_path(command):
+            command = f"cd '{working_directory}' && {command}"
 
         output = terminal_session.send_command_and_capture(command)
         return f"Stdout/Stderr:\n{output}"
