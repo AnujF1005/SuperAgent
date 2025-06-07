@@ -104,26 +104,14 @@ class BrowserTool:
                 search_bar.send_keys(query)
                 search_bar.send_keys(Keys.RETURN)
 
-                first_result_selector = (
-                    "//div[@id='links']//a[contains(@class, 'result__a')]" # DuckDuckGo specific selector
-                )
-                # Fallback, more generic, might be less reliable
-                first_result_selector_fallback = "//a[h2]"
-
+                first_result_selector = "(//a[contains(@class, 'result__a')])[1]" # More robust DuckDuckGo specific selector
 
                 try:
-                    # Try DuckDuckGo specific selector first
                     first_result_link_element = WebDriverWait(self.driver, 10).until(
-                        EC.presence_of_element_located((By.XPATH, first_result_selector))
+                        EC.visibility_of_element_located((By.XPATH, first_result_selector))
                     )
                 except TimeoutException:
-                    # Fallback selector if the primary one fails
-                    try:
-                        first_result_link_element = WebDriverWait(self.driver, 10).until(
-                            EC.presence_of_element_located((By.XPATH, first_result_selector_fallback))
-                        )
-                    except TimeoutException:
-                        return f"Could not find the first search result link for query: '{query}'."
+                    return f"Could not find the first search result link for query: '{query}'."
                 
                 first_result_url = first_result_link_element.get_attribute("href")
                 if not first_result_url:
