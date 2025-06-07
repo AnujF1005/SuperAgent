@@ -45,8 +45,6 @@ class WriteToFileTool:
     """
 
     def __call__(self, path: str, contents: str):
-        # Ensure directory exists
-        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'w') as file:
             file.write(contents)
         
