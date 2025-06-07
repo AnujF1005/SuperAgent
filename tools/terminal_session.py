@@ -3,20 +3,20 @@ import os
 import subprocess
 import time
 import uuid
+import sys
 
 class TerminalSession:
     def __init__(self, working_directory):
         self.session_name = f"superagent_{os.getpid()}_{uuid.uuid4().hex[:8]}"
         self.working_directory = os.path.abspath(working_directory)
+        self.terminal_process = None # To store the Popen object of the launched terminal
 
         if subprocess.run("which tmux", shell=True, capture_output=True, text=True).returncode != 0:
             raise EnvironmentError("tmux is required for agent's shell functionality but not found. Please install tmux: sudo apt install tmux")
 
         subprocess.run(f"tmux kill-session -t {self.session_name}", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
         subprocess.run(f"tmux new-session -d -s {self.session_name} -c '{self.working_directory}'", shell=True, check=True)
-        print(f"[SuperAgent] Spawned visible tmux terminal session: {self.session_name}")
-        print(f"[SuperAgent] To view or interact with the terminal, run: tmux attach-session -t {self.session_name}")
-
+        
         # Get the pane id for the only pane in the new session
         pane_id_proc = subprocess.run(
             f"tmux list-panes -t {self.session_name} -F '#{{pane_id}}'", shell=True, capture_output=True, text=True
@@ -25,7 +25,50 @@ class TerminalSession:
         if not panes or not panes[0]:
             raise RuntimeError(f"Could not retrieve tmux pane id for session {self.session_name}")
         self.pane_id = panes[0]
-        print(f"[SuperAgent] Using tmux pane id: {self.pane_id}")
+
+        # Launch a visible terminal and attach to the tmux session
+        attach_command = f"tmux attach-session -t {self.session_name}"
+        
+        if sys.platform.startswith('linux'):
+            # Try common Linux terminals
+            terminal_commands = [
+                f"gnome-terminal -- bash -c '{attach_command}'",
+                f"xterm -e '{attach_command}'",
+                f"konsole --noclose -e '{attach_command}'"
+            ]
+            for cmd in terminal_commands:
+                try:
+                    self.terminal_process = subprocess.Popen(cmd, shell=True, preexec_fn=os.setsid)
+                    print(f"[SuperAgent] Launched visible terminal (Linux): {cmd}")
+                    break
+                except FileNotFoundError:
+                    continue # Try next terminal
+            if not self.terminal_process:
+                print("[SuperAgent] WARNING: Could not find a suitable terminal emulator (gnome-terminal, xterm, konsole) on Linux.")
+                print(f"[SuperAgent] To view or interact with the terminal, run: {attach_command}")
+
+        elif sys.platform == 'darwin':
+            # macOS Terminal.app
+            script = f'''
+            tell application "Terminal"
+                do script "{attach_command}"
+                activate
+            end tell
+            '''
+            self.terminal_process = subprocess.Popen(['osascript', '-e', script], preexec_fn=os.setsid)
+            print(f"[SuperAgent] Launched visible terminal (macOS): Terminal.app")
+
+        elif sys.platform == 'win32':
+            # Windows Command Prompt
+            # Use `start` to open a new window and `/k` to keep it open after command
+            cmd = f"start cmd.exe /k \"{attach_command}\""
+            self.terminal_process = subprocess.Popen(cmd, shell=True)
+            print(f"[SuperAgent] Launched visible terminal (Windows): cmd.exe")
+        else:
+            print(f"[SuperAgent] WARNING: Unsupported operating system '{sys.platform}'. Cannot launch visible terminal automatically.")
+            print(f"[SuperAgent] To view or interact with the terminal, run: {attach_command}")
+
+        time.sleep(1) # Give the terminal a moment to open
 
     def send_command_and_capture(self, command):
         start_marker = f"__SUPERAGENT_START_{uuid.uuid4().hex[:8]}__"

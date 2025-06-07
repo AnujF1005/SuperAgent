@@ -13,6 +13,9 @@ class Agent:
             current_working_directory=working_directory,
         )
         self.history = []
+        
+        working_directory = os.path.abspath(working_directory)
+        os.makedirs(working_directory, exist_ok=True)        
         # Start persistent visible terminal
         self.terminal_session = TerminalSession(working_directory)
         
