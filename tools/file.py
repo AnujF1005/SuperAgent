@@ -4,7 +4,7 @@ import re
 class WriteToFileTool:
     name = "write_to_file"
     params = {
-        "required": ["path", "contents"],
+        "required": ["path", "content"],
         "optional": []
     }
     description = """
@@ -15,9 +15,9 @@ class WriteToFileTool:
     Usage:
     <write_to_file>
     <path>File path here</path>
-    <contents>
-    Your file contents here
-    </contents>
+    <content>
+    Your file content here
+    </content>
     </write_to_file>
     """
     examples = """
@@ -44,11 +44,13 @@ class WriteToFileTool:
     </write_to_file>
     """
 
-    def __call__(self, path: str, contents: str):
+    def __call__(self, path: str, content: str):
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         with open(path, 'w') as file:
-            file.write(contents)
+            file.write(content)
         
-        return "File written successfully. Updated file content:\n" + contents
+        return "File written successfully. Updated file content:\n" + content
 
 class ReadFileTool:
     name = "read_file"

@@ -7,35 +7,28 @@ import os
 class Agent:
     def __init__(self, llm, working_directory):
         self.llm = llm
+        self.working_directory = os.path.abspath(working_directory)
+        os.makedirs(self.working_directory, exist_ok=True)        
         self.prompt_manager = PromptManager(
             os="Ubuntu",
             shell="Bash",
-            current_working_directory=working_directory,
+            current_working_directory=self.working_directory,
         )
         self.history = []
         
-        working_directory = os.path.abspath(working_directory)
-        os.makedirs(working_directory, exist_ok=True)        
-        # Start persistent visible terminal
-        self.terminal_session = TerminalSession(working_directory)
+        self.terminal_session = None
         
-        # Instantiate tools
         self.tool_instances = {}
         for name, ToolClass in TOOLS_DICT.items():
             self.tool_instances[name] = ToolClass()
-            # Future: If a tool needs specific init args like terminal_session, handle here.
-            # For now, SearchTool initializes its driver internally.
 
-        # Change working directory
-        os.chdir(working_directory)
+        os.chdir(self.working_directory)
     
     def cleanup(self):
-        # Cleanup terminal session
-        if hasattr(self, "terminal_session") and self.terminal_session:
+        if self.terminal_session:
             self.terminal_session.cleanup()
             self.terminal_session = None
         
-        # Cleanup tools
         for tool_name, tool_instance in self.tool_instances.items():
             if hasattr(tool_instance, 'quit_driver') and callable(getattr(tool_instance, 'quit_driver')):
                 print(f"Attempting to quit driver for {tool_name}...")
@@ -61,15 +54,13 @@ class Agent:
 
         tool_executable = self.tool_instances[tool_name]
         
-        # Inject terminal_session for shell tool
-        # This specific injection logic might need refinement if more tools need special context
-        if tool_name == "shell" and hasattr(tool_executable, '__call__'):
-             # Assuming shell tool's __call__ can accept terminal_session
+        if tool_name == "shell":
+            if not self.terminal_session:
+                self.terminal_session = TerminalSession(self.working_directory)
             return tool_executable(**params, terminal_session=self.terminal_session)
 
-        # Validate parameters - this check is against the class definition's params
+        # Validate parameters
         expected_params = TOOLS_DICT[tool_name].params["required"] if hasattr(TOOLS_DICT[tool_name], 'params') else []
-
         if not all(p in params_list for p in expected_params):
             return f"Missing or extra parameter for tool: {tool_name}. Expected: {expected_params}, Got: {params_list}"
 

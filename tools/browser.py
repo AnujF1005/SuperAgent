@@ -49,24 +49,31 @@ class BrowserTool:
 
     def __init__(self):
         self.driver = None
-        try:
-            options = webdriver.ChromeOptions()
-            # options.add_argument('--headless') # Run in headless mode
-            options.add_argument('--no-sandbox')
-            options.add_argument('--disable-dev-shm-usage')
-            options.add_argument('--disable-gpu') # Optional, recommended for headless
-            
-            chrome_binary_path = os.environ.get('CHROME_BINARY_PATH')
-            if chrome_binary_path:
-                options.binary_location = chrome_binary_path
-            
-            service = ChromeService(ChromeDriverManager().install())
-            self.driver = webdriver.Chrome(service=service, options=options)
-        except WebDriverException as e:
-            print(f"Error initializing WebDriver: {e}")
-            print("Please ensure Chrome is installed and ChromeDriver is compatible or accessible.")
-        except Exception as e:
-            print(f"An unexpected error occurred during WebDriver initialization: {e}")
+
+    def _initialize_driver(self):
+        if self.driver is None:
+            try:
+                options = webdriver.ChromeOptions()
+                # options.add_argument('--headless') # Run in headless mode
+                options.add_argument('--no-sandbox')
+                options.add_argument('--disable-dev-shm-usage')
+                options.add_argument('--disable-gpu') # Optional, recommended for headless
+                
+                chrome_binary_path = os.environ.get('CHROME_BINARY_PATH')
+                if chrome_binary_path:
+                    options.binary_location = chrome_binary_path
+                
+                service = ChromeService(ChromeDriverManager().install())
+                self.driver = webdriver.Chrome(service=service, options=options)
+            except WebDriverException as e:
+                print(f"Error initializing WebDriver: {e}")
+                print("Please ensure Chrome is installed and ChromeDriver is compatible or accessible.")
+                self.driver = None # Ensure driver is None on failure
+                raise
+            except Exception as e:
+                print(f"An unexpected error occurred during WebDriver initialization: {e}")
+                self.driver = None # Ensure driver is None on failure
+                raise
 
     def _extract_page_content(self, current_url: str):
         """Helper function to extract and limit page content."""
@@ -79,8 +86,10 @@ class BrowserTool:
         return page_text
 
     def __call__(self, query: str = None, url: str = None):
-        if not self.driver:
-            return "WebDriver not initialized. Cannot perform browser actions."
+        try:
+            self._initialize_driver()
+        except Exception as e:
+            return f"Failed to initialize WebDriver: {e}"
 
         if url and query:
             return "Error: Provide either 'url' or 'query', not both."
