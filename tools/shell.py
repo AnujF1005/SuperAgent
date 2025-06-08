@@ -65,4 +65,4 @@ class ShellTool:
             command = f"cd '{working_directory}' && {command}"
 
         output = terminal_session.send_command_and_capture(command)
-        return f"Stdout/Stderr:\n{output}"
+        return f"Command output:\n{output}"

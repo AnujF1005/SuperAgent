@@ -4,11 +4,14 @@ import subprocess
 import time
 import uuid
 import sys
+import platform
 
 class TerminalSession:
     def __init__(self, working_directory):
         self.session_name = f"superagent_{os.getpid()}_{uuid.uuid4().hex[:8]}"
         self.working_directory = os.path.abspath(working_directory)
+        if not os.path.exists(self.working_directory):
+            os.makedirs(self.working_directory, exist_ok=True)
         self.terminal_process = None # To store the Popen object of the launched terminal
 
         if subprocess.run("which tmux", shell=True, capture_output=True, text=True).returncode != 0:
@@ -99,10 +102,10 @@ class TerminalSession:
             last_pane_dump = pane  # keep last for possible debugging
 
             if start_marker in pane and end_marker in pane:
+                pane = pane.replace(f"echo {end_marker}", "")
                 start_idx = pane.rfind(start_marker) + len(start_marker)
                 end_idx = pane.rfind(end_marker)
                 output = pane[start_idx:end_idx].strip()
-                output = output.replace(f"echo {end_marker}", "")
                 found_end = True
                 break
             time.sleep(poll_interval)
@@ -121,4 +124,18 @@ class TerminalSession:
         return output
 
     def cleanup(self):
+        # Terminate the launched terminal process if it exists
+        if self.terminal_process and self.terminal_process.poll() is None:
+            try:
+                if sys.platform.startswith('linux') or sys.platform == 'darwin':
+                    # On Unix-like systems, send SIGTERM to the process group
+                    os.killpg(os.getpgid(self.terminal_process.pid), 15) # 15 is SIGTERM
+                else:
+                    self.terminal_process.terminate()
+                self.terminal_process.wait(timeout=5) # Wait for process to terminate
+            except Exception as e:
+                print(f"[SuperAgent] WARNING: Error terminating terminal process: {e}")
+                self.terminal_process.kill() # Force kill if graceful fails
+        
+        # Kill the tmux session
         subprocess.run(f"tmux kill-session -t {self.session_name}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
