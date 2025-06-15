@@ -3,7 +3,10 @@ import re
 
 class WriteToFileTool:
     name = "write_to_file"
-    params = ["path", "contents"]
+    params = {
+        "required": ["path", "content"],
+        "optional": []
+    }
     description = """
     Request to write content to a file at the specified path. If the file exists, it will be overwritten with the provided content. If the file doesn't exist, it will be created. This tool will automatically create any directories needed to write the file.
     Parameters:
@@ -12,9 +15,9 @@ class WriteToFileTool:
     Usage:
     <write_to_file>
     <path>File path here</path>
-    <contents>
-    Your file contents here
-    </contents>
+    <content>
+    Your file content here
+    </content>
     </write_to_file>
     """
     examples = """
@@ -41,15 +44,20 @@ class WriteToFileTool:
     </write_to_file>
     """
 
-    def __call__(self, path: str, contents: str):
+    def __call__(self, path: str, content: str):
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         with open(path, 'w') as file:
-            file.write(contents)
+            file.write(content)
         
-        return "File written successfully. Updated file content:\n" + contents
+        return "File written successfully. Updated file content:\n" + content
 
 class ReadFileTool:
     name = "read_file"
-    params = ["path"]
+    params = {
+        "required": ["path"],
+        "optional": []
+    }
     description = """
     Request to read the contents of a file at the specified path. Use this when you need to examine the contents of an existing file you do not know the contents of, for example to analyze code, review text files, or extract information from configuration files. Automatically extracts raw text from PDF and DOCX files. May not be suitable for other types of binary files, as it returns the raw content as a string.
     Parameters:
@@ -75,7 +83,10 @@ class ReadFileTool:
 
 class ReplaceInFileTool:
     name = "replace_in_file"
-    params = ["path", "diff"]
+    params = {
+        "required": ["path", "diff"],
+        "optional": []
+    }
     description = """
     Request to replace sections of content in an existing file using SEARCH/REPLACE blocks that define exact changes to specific parts of the file. This tool should be used when you need to make targeted changes to specific parts of a file.
     Parameters:
@@ -133,25 +144,10 @@ class ReplaceInFileTool:
     def _parse_diff_blocks(self, diff_str: str) -> list[tuple[str, str]]:
         """
         Parses the diff string into a list of (search_pattern, replacement_text) tuples.
+        Handles escaped newlines and normalizes newline conventions.
         """
-        # Pre-process the diff string to handle escaped newlines and normalize newline conventions:
-        # 1. Replace literal "\\n" (escaped newline) with actual newline "\n".
-        #    This is important if the diff string comes from a source that escapes them (e.g., JSON, LLM output).
-        # 2. Replace literal "\\r" (escaped carriage return) with actual carriage return "\r".
-        # 3. Normalize platform-specific newlines (\r\n, \r) to a single \n for consistent regex matching.
-        # The order of these replacements can matter.
-        
-        # Step 1: Handle common escaped characters like \\n, \\r, \\t
-        # Note: Be careful with \\ itself if it's meant to be a literal backslash in content.
-        # For this tool, \\n and \\r are the most critical for structure.
-        processed_diff_str = diff_str.replace('\\\\', '\\') # Handle escaped backslashes first if they might exist e.g. \\\\n -> \\n
-        processed_diff_str = processed_diff_str.replace('\\n', '\n')
-        processed_diff_str = processed_diff_str.replace('\\r', '\r')
-        processed_diff_str = processed_diff_str.replace('\\t', '\t')
-        # Add other escaped characters if necessary, e.g. \\" -> "
-
-        # Step 2: Normalize all newline types to \n
-        processed_diff_str = processed_diff_str.replace('\r\n', '\n').replace('\r', '\n')
+        # Normalize all newline types to \n for consistent regex matching
+        processed_diff_str = diff_str.replace('\r\n', '\n').replace('\r', '\n')
 
         changes = []
         # Regex to find blocks:
@@ -160,7 +156,7 @@ class ReplaceInFileTool:
         # \s*?\n : Optional trailing whitespace on delimiter line, then a mandatory newline.
         # (.*?) : Captured group for search/replace content (non-greedy, re.DOTALL makes . match newlines).
         # \n^\s*======= : Mandatory newline, then start of next delimiter line.
-        # \s*?$ : Optional trailing whitespace on the REPLACE line, then end of line (due to re.MULTILINE).
+        # \s*?\n(.*?)\n^\s*>>>>>>> REPLACE\s*?$ : Mandatory newline, then start of next delimiter line, then replace content, then end delimiter.
         pattern = re.compile(
             r"^\s*<<<<<<< SEARCH\s*?\n(.*?)\n^\s*=======\s*?\n(.*?)\n^\s*>>>>>>> REPLACE\s*?$",
             re.DOTALL | re.MULTILINE
@@ -171,27 +167,122 @@ class ReplaceInFileTool:
             replace_content = match.group(2)
             changes.append((search_content, replace_content))
         
-        # If no changes were found, it might be useful to log or indicate why.
-        # For example, if processed_diff_str is very different from diff_str.
-        # However, the calling code already handles the "no changes found" case.
-
         return changes
 
-    def _apply_changes_to_content(self, original_content: str, changes: list[tuple[str, str]]) -> tuple[str, int]:
+    def _line_trimmed_fallback_match(self, original_content: str, search_content: str, start_index: int) -> tuple[int, int] | None:
         """
-        Applies a list of (search, replace) changes to the content.
-        Each search pattern is replaced only once per block.
-        Returns the modified content and the number of changes successfully applied that resulted in textual difference.
+        Attempts a line-trimmed fallback match for the given search content in the original content.
+        It tries to match `search_content` lines against a block of lines in `original_content` starting
+        from `start_index`. Lines are matched by trimming leading/trailing whitespace and ensuring
+        they are identical afterwards.
+        Returns [matchIndexStart, matchIndexEnd] if found, or None if not found.
         """
-        modified_content = original_content
-        applied_count = 0
+        original_lines = original_content.split("\n")
+        search_lines = search_content.split("\n")
+
+        # Trim trailing empty line if exists (from the trailing \n in search_content)
+        if search_lines and search_lines[-1] == "":
+            search_lines.pop()
+
+        if not search_lines: # Handle empty search content for line-trimmed match
+            return None
+
+        # Find the line number where start_index falls
+        start_line_num = 0
+        current_char_index = 0
+        while current_char_index < start_index and start_line_num < len(original_lines):
+            current_char_index += len(original_lines[start_line_num]) + 1 # +1 for \n
+            start_line_num += 1
+
+        # For each possible starting position in original content
+        for i in range(start_line_num, len(original_lines) - len(search_lines) + 1):
+            matches = True
+            # Try to match all search lines from this position
+            for j in range(len(search_lines)):
+                original_trimmed = original_lines[i + j].strip()
+                search_trimmed = search_lines[j].strip()
+
+                if original_trimmed != search_trimmed:
+                    matches = False
+                    break
+            
+            # If we found a match, calculate the exact character positions
+            if matches:
+                # Find start character index
+                match_start_index = 0
+                for k in range(i):
+                    match_start_index += len(original_lines[k]) + 1 # +1 for \n
+
+                # Find end character index
+                match_end_index = match_start_index
+                for k in range(len(search_lines)):
+                    match_end_index += len(original_lines[i + k]) + 1 # +1 for \n
+                
+                # Adjust match_end_index if the last line of original_content doesn't end with a newline
+                # This is important for accurate slicing
+                if i + len(search_lines) == len(original_lines) and not original_content.endswith('\n'):
+                    match_end_index -= 1 # Remove the extra +1 for the non-existent newline
+
+                return [match_start_index, match_end_index]
+        return None
+
+    def _block_anchor_fallback_match(self, original_content: str, search_content: str, start_index: int) -> tuple[int, int] | None:
+        """
+        Attempts to match blocks of code by using the first and last lines as anchors.
+        This is a third-tier fallback strategy that helps match blocks where we can identify
+        the correct location by matching the beginning and end, even if the exact content
+        differs slightly.
+        """
+        original_lines = original_content.split("\n")
+        search_lines = search_content.split("\n")
+
+        # Only use this approach for blocks of 3+ lines
+        if len(search_lines) < 3:
+            return None
+
+        # Trim trailing empty line if exists
+        if search_lines and search_lines[-1] == "":
+            search_lines.pop()
         
-        for search_code, update_code in changes:
-            new_content_after_replace = modified_content.replace(search_code, update_code, 1)
-            if new_content_after_replace != modified_content:
-                applied_count += 1
-                modified_content = new_content_after_replace
-        return modified_content, applied_count
+        if not search_lines: # Handle empty search content after pop
+            return None
+
+        first_line_search = search_lines[0].strip()
+        last_line_search = search_lines[-1].strip()
+        search_block_size = len(search_lines)
+
+        # Find the line number where start_index falls
+        start_line_num = 0
+        current_char_index = 0
+        while current_char_index < start_index and start_line_num < len(original_lines):
+            current_char_index += len(original_lines[start_line_num]) + 1
+            start_line_num += 1
+
+        # Look for matching start and end anchors
+        for i in range(start_line_num, len(original_lines) - search_block_size + 1):
+            # Check if first line matches
+            if original_lines[i].strip() != first_line_search:
+                continue
+
+            # Check if last line matches at the expected position
+            if original_lines[i + search_block_size - 1].strip() != last_line_search:
+                continue
+
+            # Calculate exact character positions
+            match_start_index = 0
+            for k in range(i):
+                match_start_index += len(original_lines[k]) + 1
+
+            match_end_index = match_start_index
+            for k in range(search_block_size):
+                match_end_index += len(original_lines[i + k]) + 1
+            
+            # Adjust match_end_index if the last line of original_content doesn't end with a newline
+            if i + search_block_size == len(original_lines) and not original_content.endswith('\n'):
+                match_end_index -= 1
+
+            return [match_start_index, match_end_index]
+        return None
 
     def __call__(self, path: str, diff: str) -> str:
         # --- 1. Input Validation ---
@@ -225,17 +316,51 @@ class ReplaceInFileTool:
             return f"ERROR: Critical error parsing diff blocks for file {path}: {str(e)}"
 
         if not changes_list: 
-            # Provide more context if parsing fails after normalization attempt
-            # This can happen if the structure is still not matched after newline processing
-            # (e.g. incorrect delimiter keywords, missing =======, etc.)
             return (f"ERROR: No valid SEARCH/REPLACE blocks found in the provided diff for file {path}. "
                     f"File content has not been modified. Ensure diff format is correct and newlines are properly represented. "
                     f"Input diff (first 100 chars): '{diff[:100]}'")
             
         num_changes_requested = len(changes_list)
+        modified_content = original_content
+        applied_count = 0
+        last_processed_index = 0 # Keep track of the last processed character index in the original content
 
         # --- 6. Apply Changes ---
-        modified_content, applied_count = self._apply_changes_to_content(original_content, changes_list)
+        for search_code, update_code in changes_list:
+            match_start_index = -1
+            match_end_index = -1
+
+            # Attempt 1: Exact match
+            exact_index = modified_content.find(search_code, last_processed_index)
+            if exact_index != -1:
+                match_start_index = exact_index
+                match_end_index = exact_index + len(search_code)
+            else:
+                # Attempt 2: Line-trimmed fallback match
+                line_match = self._line_trimmed_fallback_match(modified_content, search_code, last_processed_index)
+                if line_match:
+                    match_start_index, match_end_index = line_match
+                else:
+                    # Attempt 3: Block anchor fallback match
+                    block_match = self._block_anchor_fallback_match(modified_content, search_code, last_processed_index)
+                    if block_match:
+                        match_start_index, match_end_index = block_match
+            
+            if match_start_index != -1:
+                # Reconstruct the content with the replacement
+                modified_content = (
+                    modified_content[:match_start_index] +
+                    update_code +
+                    modified_content[match_end_index:]
+                )
+                applied_count += 1
+                # Update last_processed_index for the next search
+                # This is crucial for sequential replacements
+                last_processed_index = match_start_index + len(update_code)
+            else:
+                # If no match found for a block, it's an error or warning
+                # For now, we'll just report it and continue, but a more robust system might stop or ask for clarification.
+                print(f"WARNING: SEARCH block did not find a match in file {path} starting from index {last_processed_index}. Search content (first 100 chars): '{search_code[:100]}'")
 
         # --- 7. Process Results and Write File if Changed ---
         if applied_count > 0: 

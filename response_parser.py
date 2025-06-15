@@ -31,7 +31,7 @@ def parse_ai_response(response: str):
                         })
                         accumulator = ""
                     current_tool = tool_name
-                    current_tool_required_params = {f"<{param}>": param for param in TOOLS_DICT[tool_name].params}
+                    current_tool_required_params = {f"<{param}>": param for param in TOOLS_DICT[tool_name].params["required"] + TOOLS_DICT[tool_name].params["optional"]}
                     break
         else:
             if (current_param != None) and (accumulator.endswith(f"</{current_param}>")):

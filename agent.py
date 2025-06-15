@@ -7,34 +7,63 @@ import os
 class Agent:
     def __init__(self, llm, working_directory):
         self.llm = llm
+        self.working_directory = os.path.abspath(working_directory)
+        os.makedirs(self.working_directory, exist_ok=True)        
         self.prompt_manager = PromptManager(
             os="Ubuntu",
             shell="Bash",
-            current_working_directory=working_directory,
+            current_working_directory=self.working_directory,
         )
         self.history = []
-        # Start persistent visible terminal
-        self.terminal_session = TerminalSession(working_directory)
-        # Change working directory as before
-        os.chdir(working_directory)
+        
+        self.terminal_session = None
+        
+        self.tool_instances = {}
+        for name, ToolClass in TOOLS_DICT.items():
+            self.tool_instances[name] = ToolClass()
+
+        os.chdir(self.working_directory)
     
     def cleanup(self):
-        if hasattr(self, "terminal_session") and self.terminal_session:
+        if self.terminal_session:
             self.terminal_session.cleanup()
             self.terminal_session = None
+        
+        for tool_name, tool_instance in self.tool_instances.items():
+            if hasattr(tool_instance, 'quit_driver') and callable(getattr(tool_instance, 'quit_driver')):
+                print(f"Attempting to quit driver for {tool_name}...")
+                try:
+                    tool_instance.quit_driver()
+                except Exception as e:
+                    print(f"Error quitting driver for {tool_name}: {e}")
+            elif hasattr(tool_instance, 'cleanup') and callable(getattr(tool_instance, 'cleanup')):
+                print(f"Attempting to cleanup {tool_name}...")
+                try:
+                    tool_instance.cleanup()
+                except Exception as e:
+                    print(f"Error cleaning up {tool_name}: {e}")
+
 
     def invoke_tool(self, tool_call: dict):
         tool_name = tool_call["tool"]
         params = tool_call["params"]
+        params_list = list(params.keys())
 
-        tool_executable = TOOLS_DICT[tool_name]()
-        # Inject terminal_session for shell tool
+        if tool_name not in self.tool_instances:
+            return f"Tool '{tool_name}' not found."
+
+        tool_executable = self.tool_instances[tool_name]
+        
         if tool_name == "shell":
+            if not self.terminal_session:
+                self.terminal_session = TerminalSession(self.working_directory)
             return tool_executable(**params, terminal_session=self.terminal_session)
 
-        if set(tool_executable.params) != set(params.keys()):
-            return "Missing or extra parameter for tool: " + tool_name
-        
+        # Validate parameters
+        expected_params = TOOLS_DICT[tool_name].params["required"] if hasattr(TOOLS_DICT[tool_name], 'params') else []
+        if not all(p in params_list for p in expected_params):
+            return f"Missing or extra parameter for tool: {tool_name}. Expected: {expected_params}, Got: {params_list}"
+
         return tool_executable(**params)
 
     def invoke(self, query: str):
@@ -83,11 +112,12 @@ class Agent:
 
             print(f"Tool Response: {tool_response}")
             self.history.append(tool_response)
-            prompt = "\n".join(self.history) + "\n" + tool_response
+            prompt += "\n\n" + str(response) + "\n\n" + str(tool_response) + "\n\n"
             
             print("\n\n"+ "="*50 + "\n\n")
             if is_task_completed:
                 print("Task completed!")
                 print("Exiting...")
+                self.cleanup() # Call cleanup before breaking
                 break
             
