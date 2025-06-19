@@ -27,7 +27,7 @@ def parse_ai_response(response: str):
                     if len(accumulator) > len(start_tag):
                         content_blocks.append({
                             "type": ContentType.TEXT_CHUNK,
-                            "text": accumulator[:-len(start_tag)],
+                            "content": accumulator[:-len(start_tag)],
                         })
                         accumulator = ""
                     current_tool = tool_name
@@ -77,7 +77,7 @@ def parse_ai_response(response: str):
     elif len(accumulator) > 0:
         content_blocks.append({
             "type": ContentType.TEXT_CHUNK,
-            "text": accumulator,
+            "content": accumulator,
         })
 
     return content_blocks

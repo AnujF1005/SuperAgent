@@ -50,7 +50,7 @@ class WriteToFileTool:
         with open(path, 'w') as file:
             file.write(content)
         
-        return "File written successfully. Updated file content:\n" + content
+        return f"New file created: {path} and written successfully." # No need to return the content, as it is already present in the context of the agent.
 
 class ReadFileTool:
     name = "read_file"
@@ -79,7 +79,7 @@ class ReadFileTool:
         if not os.path.exists(path):
             return f"File at path {path} does not exist"
         with open(path, 'r') as file:
-            return "File content:\n" + file.read()
+            return f"Content of file {path}:\n" + file.read()
 
 class ReplaceInFileTool:
     name = "replace_in_file"
