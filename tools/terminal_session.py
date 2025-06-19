@@ -86,30 +86,38 @@ class TerminalSession:
         time.sleep(0.4)
 
         # Poll and also log the full pane output for diagnosis
-        max_wait = 60
+        max_wait = 600
         waited = 0
-        poll_interval = 0.3
+        poll_interval = 2
         output = ""
         found_end = False
 
         last_pane_dump = ""
-        while waited < max_wait:
-            pane_capture = subprocess.run(
-                f"tmux capture-pane -t {self.pane_id} -p -S -500 -J",
-                shell=True, capture_output=True, text=True
-            )
-            pane = pane_capture.stdout
-            last_pane_dump = pane  # keep last for possible debugging
 
-            if start_marker in pane and end_marker in pane:
+        try:
+            while waited < max_wait:
+                pane_capture = subprocess.run(
+                    f"tmux capture-pane -t {self.pane_id} -p -S -500 -J",
+                    shell=True, capture_output=True, text=True
+                )
+                pane = pane_capture.stdout
+                last_pane_dump = pane  # keep last for possible debugging
+
                 pane = pane.replace(f"echo {end_marker}", "")
-                start_idx = pane.rfind(start_marker) + len(start_marker)
-                end_idx = pane.rfind(end_marker)
-                output = pane[start_idx:end_idx].strip()
-                found_end = True
-                break
-            time.sleep(poll_interval)
-            waited += poll_interval
+
+                if start_marker in pane and end_marker in pane:
+                    start_idx = pane.rfind(start_marker) + len(start_marker)
+                    end_idx = pane.rfind(end_marker)
+                    output = pane[start_idx:end_idx].strip()
+                    found_end = True
+                    break
+                time.sleep(poll_interval)
+                waited += poll_interval
+        except KeyboardInterrupt:
+            print("[SuperAgent] Command capture interrupted by user.")
+        except Exception as e:
+            print(f"[SuperAgent] WARNING: Error capturing tmux pane output: {e}")
+            output = f"[SuperAgent] ERROR: Failed to capture command output due to an error: {e}"
 
         # If still not found, dump log to disk for diagnosis:
         if not found_end:
