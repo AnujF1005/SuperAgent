@@ -88,10 +88,10 @@ class ReplaceInFileTool:
         "optional": []
     }
     description = """
-    Request to replace sections of content in an existing file using SEARCH/REPLACE blocks that define exact changes to specific parts of the file. This tool should be used when you need to make targeted changes to specific parts of a file.
+    Request to replace sections of content in an existing file using SEARCH-REPLACE blocks that define exact changes to specific parts of the file. This tool should be used when you need to make targeted changes to specific parts of a file.
     Parameters:
     - path: (required) The path of the file to modify (relative to the current working directory)
-    - diff: (required) One or more SEARCH and REPLACE blocks following this exact format:
+    - diff: (required) One or more SEARCH-REPLACE blocks with ======= separating search and replace blocks, following this exact format:
     ```
     <<<<<<< SEARCH
     [exact content to find]
@@ -100,15 +100,15 @@ class ReplaceInFileTool:
     >>>>>>> REPLACE
     ```
     Critical rules:
+    1. Every SEARCH block should have a corresponding REPLACE block.
     1. SEARCH content must match the associated file section to find EXACTLY:
         * Match character-for-character including whitespace, indentation, line endings
         * Include all comments, docstrings, etc.
-    2. SEARCH - REPLACE blocks will ONLY replace the first match occurrence.
+    2. SEARCH-REPLACE blocks will ONLY replace the first match occurrence.
         * Including multiple unique SEARCH/REPLACE blocks if you need to make multiple changes.
         * Include *just* enough lines in each SEARCH section to uniquely match each set of lines that need to change.
         * When using multiple SEARCH/REPLACE blocks, list them in the order they appear in the file.
-    3. Keep SEARCH - REPLACE blocks concise.
-    4. Every SEARCH block must have a corresponding REPLACE block.
+    3. Keep SEARCH-REPLACE blocks concise.
     4. Special operations: To delete code, use empty REPLACE section.
     Usage:
     <replace_in_file>
@@ -144,51 +144,29 @@ class ReplaceInFileTool:
     def _parse_diff_blocks(self, diff_str: str) -> list[tuple[str, str]]:
         """
         Parses the diff string into a list of (search_pattern, replacement_text) tuples.
-        This version is robust against missing final '>>>>>>> REPLACE' delimiters.
+        Handles escaped newlines and normalizes newline conventions.
         """
-        # Normalize all newline types to \n for consistent processing
+        # Normalize all newline types to \n for consistent regex matching
         processed_diff_str = diff_str.replace('\r\n', '\n').replace('\r', '\n')
-        
-        # A block is defined as starting with <<<<<<< SEARCH. We split the diff by this
-        # delimiter, using a lookahead `(?=...)` to keep the delimiter with its content.
-        chunks = re.split(r'(^\s*<<<<<<< SEARCH)', processed_diff_str, flags=re.MULTILINE)
-        
+
         changes = []
+        # Regex to find blocks:
+        # ^\s* : Start of line (due to re.MULTILINE), optional leading whitespace.
+        # <<<<<<< SEARCH : Delimiter keyword.
+        # \s*?\n : Optional trailing whitespace on delimiter line, then a mandatory newline.
+        # (.*?) : Captured group for search/replace content (non-greedy, re.DOTALL makes . match newlines).
+        # \n^\s*======= : Mandatory newline, then start of next delimiter line.
+        # \s*?\n(.*?)\n^\s*>>>>>>> REPLACE\s*?$ : Mandatory newline, then start of next delimiter line, then replace content, then end delimiter.
+        pattern = re.compile(
+            r"^\s*<<<<<<< SEARCH\s*?\n(.*?)\n^\s*=======\s*?\n(.*?)\n^\s*>>>>>>> REPLACE\s*?$",
+            re.DOTALL | re.MULTILINE
+        )
         
-        # The split results in `['preamble', 'delim1', 'content1', 'delim2', 'content2', ...]`.
-        # We iterate through the (delimiter, content) pairs.
-        i = 1
-        while i < len(chunks):
-            # Check for a delimiter followed by its content block.
-            if i + 1 >= len(chunks):
-                break
-
-            block_content = chunks[i] + chunks[i+1]
-            
-            # Define the separator pattern between SEARCH and REPLACE blocks.
-            separator_pattern = r'\n^\s*=======\s*\n'
-            
-            # A valid block must contain the separator. If not found, skip this chunk.
-            if not re.search(separator_pattern, block_content, flags=re.MULTILINE | re.DOTALL):
-                i += 2
-                continue
-
-            # Split the block into the part before and after the separator.
-            header_and_search, replace_and_trailer = re.split(
-                separator_pattern, block_content, maxsplit=1, flags=re.MULTILINE | re.DOTALL
-            )
-            
-            # Extract search content by removing the '<<<<<<< SEARCH' header.
-            search_content = re.sub(r'^\s*<<<<<<< SEARCH\s*\n', '', header_and_search, flags=re.MULTILINE)
-            
-            # The replace content is the second part. We clean it by removing the optional
-            # '>>>>>>> REPLACE' trailer and any trailing whitespace.
-            # The `\s*$` ensures we match the trailer even if it has trailing spaces or newlines.
-            replace_content = re.sub(r'\n\s*>>>>>>> REPLACE\s*$', '', replace_and_trailer).rstrip()
-
+        for match in pattern.finditer(processed_diff_str):
+            search_content = match.group(1)
+            replace_content = match.group(2)
             changes.append((search_content, replace_content))
-            i += 2 # Move to the next delimiter-content pair
-            
+        
         return changes
 
     def _line_trimmed_fallback_match(self, original_content: str, search_content: str, start_index: int) -> tuple[int, int] | None:
@@ -389,7 +367,7 @@ class ReplaceInFileTool:
             try:
                 with open(path, 'w', encoding='utf-8') as file:
                     file.write(modified_content)
-                return modified_content
+                return f"File {path} updated successfully with {applied_count} change(s) applied out of {num_changes_requested} requested. Content has been modified."
             except Exception as e:
                 return f"ERROR: Error writing updated content to file {path}: {str(e)}. In-memory changes were not saved."
         else: 

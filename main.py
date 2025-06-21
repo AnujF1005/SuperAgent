@@ -29,5 +29,6 @@ if __name__=="__main__":
     args = parser.parse_args()
     print(args)
     invoke_agent(args.task, args.wd)
-    # For debugging purposes
-    # invoke_agent("Create a python simulation of big bang using pygame", "temp")
+
+    # # For debugging purposes
+    # invoke_agent("Create a python simulation of big bang. Also add slider to control speed of simulation.", "temp")

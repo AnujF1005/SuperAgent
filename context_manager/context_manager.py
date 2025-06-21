@@ -18,12 +18,25 @@ class ContextManager:
 
     """
 
+    CHECK_TOOL_SUCCESS_PROMPT = """
+    You are a tool execution evaluator. Your task is to determine if a tool execution was successful based on given tool call and its response. Your response should be a simple "yes" or "no".
+    Don't include any additional text or explanations.
+    Tool Call:
+    ---
+    {tool_call}
+    ---
+    Tool Response:
+    ---
+    {tool_response}
+    ---
+    """
+
     def __init__(self, llm, compress_on_add: bool = True):
         self.llm = llm
         self.compress_on_add = compress_on_add
         self.context_history = []
-        # Stores { "intent_summary": "msg_id_of_failed_ai_call" }
-        self.pending_failed_tool_calls = {}
+        # Stores (ai_msg_id, failed_tool_call_id) that need to be resolved
+        self.pending_failed_tool_calls = []
         self.uncompressed_tokens = 0
         self.compressed_tokens = 0
 
@@ -45,11 +58,12 @@ class ContextManager:
         # Assuming your LLM library has a simple invocation method
         response = self.llm.invoke(prompt)
         return response.content.strip()
-
-    def _get_tool_intent(self, tool_call: dict) -> str:
-        """Creates a simple summary of a tool call for matching failures."""
-        # A more robust version could use an LLM to summarize the intent.
-        return f"Tool: {tool_call['tool_name']}, Key Args: {list(tool_call.get('args', {}).keys())}"
+    
+    def _is_tool_execution_successful(self, tool_call: str, tool_response: str) -> bool:
+        """Determines if a tool execution was successful based on its response."""
+        prompt = self.CHECK_TOOL_SUCCESS_PROMPT.format(tool_call=tool_call, tool_response=tool_response)
+        response = self.llm.invoke(prompt)
+        return response.content.strip().lower() == "yes"
 
     def add_message(self, message: dict):
         """Adds a new message to the context, processing it based on type."""
@@ -80,27 +94,31 @@ class ContextManager:
             last_ai_message = next((m for m in reversed(self.context_history) if m["type"] == "ai" and m["metadata"].get("tool_call")), None)
             
             if last_ai_message:
-                is_successful = not ("error" in original_content.lower() or "failed" in original_content.lower()) # Use llm to determine success in a real scenario
+                is_successful = self._is_tool_execution_successful(self._tool_string(last_ai_message["metadata"]["tool_call"]), original_content)
                 last_ai_message["metadata"]["tool_successful"] = is_successful
                 new_message["metadata"]["is_response_to"] = last_ai_message["id"]
 
                 if not is_successful:
                     # Mark the previous AI call as a pending failure
-                    intent = self._get_tool_intent(last_ai_message["metadata"]["tool_call"])
-                    self.pending_failed_tool_calls[intent] = last_ai_message["id"]
-                else:
-                    # If this one succeeded, check if it resolves a past failure
-                    intent = self._get_tool_intent(last_ai_message["metadata"]["tool_call"])
-                    if intent in self.pending_failed_tool_calls:
-                        failed_msg_id = self.pending_failed_tool_calls[intent]
-                        # Prune the failed AI message and its tool response
-                        self.context_history = [
-                            m for m in self.context_history
-                            if m.get("id") != failed_msg_id and m.get("metadata", {}).get("is_response_to") != failed_msg_id
-                        ]
-                        del self.pending_failed_tool_calls[intent]
-                        print(f"INFO: Pruned failed tool call {failed_msg_id} due to success.")
-
+                    self.pending_failed_tool_calls.append((last_ai_message["id"], msg_id))
+                elif len(self.pending_failed_tool_calls) > 0:
+                    # If this one succeeded, remove all pending failures without removing first ai message.
+                    to_delete_ids = []
+                    for i, (ai_id, tool_id) in enumerate(self.pending_failed_tool_calls):
+                        if i != 0: # Skip the first ai message
+                            to_delete_ids.append(ai_id)
+                        to_delete_ids.append(tool_id)
+                    i = 0
+                    while i < len(self.context_history):
+                        msg = self.context_history[i]
+                        if msg["id"] in to_delete_ids:
+                            del self.context_history[i]
+                            continue
+                        i += 1
+                    
+                    # Clear the pending failed tool calls
+                    self.pending_failed_tool_calls.clear()
+                        
         self.context_history.append(new_message)
         # Update token counts
         self.uncompressed_tokens += len(original_content.split())
