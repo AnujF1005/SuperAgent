@@ -32,4 +32,4 @@ if __name__=="__main__":
 
     # # For debugging purposes
     # # invoke_agent("Create a python simulation of big bang. Also add slider to control speed of simulation.", "temp")
-    # invoke_agent("Create a game of life using python.", "temp")
+    # invoke_agent("Go through all the project files and refactor the name of the class ReplaceInFileTool with GitReplaceTool", "SuperAgentRunner")
