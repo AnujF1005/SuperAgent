@@ -10,17 +10,22 @@ class ContextManager:
     3.  Condense long explanations into concise points.
     4.  Focus on the *conclusion* or *decision* the AI made.
     5.  The output must be a concise summary of the original message.
+    6.  Do NOT include any additional text like "Here is the summary" or "The AI said" or similar phrases.
 
     Original Message:
     ---
     {original_ai_message}
     ---
-
     """
 
     CHECK_TOOL_SUCCESS_PROMPT = """
     You are a tool execution evaluator. Your task is to determine if a tool execution was successful based on given tool call and its response. Your response should be a simple "yes" or "no".
     Don't include any additional text or explanations.
+
+    RULES:
+    1.  A tool execution is considered successful if it returns the expected result or completes the task it was designed for.
+    2.  If the tool call contains respond from USER, it is always considered successful.
+
     Tool Call:
     ---
     {tool_call}
@@ -31,14 +36,29 @@ class ContextManager:
     ---
     """
 
+    IS_GOAL_ACHIEVED_PROMPT = """
+    You are a helper for an LLM based agent. In agent environments, the requested tool call by an agent may not always succeed. In such cases, the agent retries the tool call with different attributes or parameters or content
+    or even use a different tool or mix of different tools to achieve the same goal. I will give you a back and forth conversation between an AI agent and a tool execution which can contain multiple tool calls and responses.
+    Generally, the first tool call request gives the intent of the tool call and the subsequent tool calls are retries or attempts to achieve the same goal. The last tool execution response will always be the successful one.
+    Your task is to determine if the goal of the agent was achieved by the last tool call or it is half done and needs further tool calls to achieve the goal.
+    Your response should be a simple "yes" or "no", where "yes" meaning goal is completed and "no" meaning goal is not completed and more tool calls may be required.
+    Do not include any additional text or explanations.
+
+    Conversation:
+    ---
+    {conversation}
+    ---
+    """
+
     def __init__(self, llm, compress_on_add: bool = True):
         self.llm = llm
         self.compress_on_add = compress_on_add
-        self.context_history = []
+        self.context_history = {} # Stores messages in the format {id: message_dict}
         # Stores (ai_msg_id, failed_tool_call_id) that need to be resolved
         self.pending_failed_tool_calls = []
         self.uncompressed_tokens = 0
         self.compressed_tokens = 0
+        self._last_message_id = None
 
     def __del__(self):
         """Cleanup method to ensure no memory leaks."""
@@ -64,6 +84,12 @@ class ContextManager:
         prompt = self.CHECK_TOOL_SUCCESS_PROMPT.format(tool_call=tool_call, tool_response=tool_response)
         response = self.llm.invoke(prompt)
         return response.content.strip().lower() == "yes"
+    
+    def _is_goal_achieved(self, conversation: str) -> bool:
+        """Determines if the goal of the agent was achieved based on the conversation."""
+        prompt = self.IS_GOAL_ACHIEVED_PROMPT.format(conversation=conversation)
+        response = self.llm.invoke(prompt)
+        return response.content.strip().lower() == "yes"
 
     def add_message(self, message: dict):
         """Adds a new message to the context, processing it based on type."""
@@ -86,12 +112,14 @@ class ContextManager:
         elif msg_type == "ai":
             new_message["compressed_content"] = self._compress_content(original_content)
             if message.get("tool_calls"):
-                new_message["metadata"]["tool_call"] = message["tool_calls"][0] # Assuming one for simplicity
+                new_message["metadata"]["tool_call"] = message["tool_calls"][0] # Assuming one for simplicity TODO: Handle multiple tool calls if needed
 
         elif msg_type == "tool":
             # This logic assumes the tool response is for the IMMEDIATELY preceding AI message.
             # A more robust system would use IDs to link them explicitly.
-            last_ai_message = next((m for m in reversed(self.context_history) if m["type"] == "ai" and m["metadata"].get("tool_call")), None)
+            last_ai_message = None
+            if self._last_message_id is not None and self.context_history[self._last_message_id]["type"] == "ai":
+                last_ai_message = self.context_history[self._last_message_id]
             
             if last_ai_message:
                 is_successful = self._is_tool_execution_successful(self._tool_string(last_ai_message["metadata"]["tool_call"]), original_content)
@@ -102,27 +130,51 @@ class ContextManager:
                     # Mark the previous AI call as a pending failure
                     self.pending_failed_tool_calls.append((last_ai_message["id"], msg_id))
                 elif len(self.pending_failed_tool_calls) > 0:
-                    # If this one succeeded, remove all pending failures without removing first ai message.
-                    to_delete_ids = []
-                    for i, (ai_id, tool_id) in enumerate(self.pending_failed_tool_calls):
-                        if i != 0: # Skip the first ai message
-                            to_delete_ids.append(ai_id)
-                        to_delete_ids.append(tool_id)
-                    i = 0
-                    while i < len(self.context_history):
-                        msg = self.context_history[i]
-                        if msg["id"] in to_delete_ids:
-                            del self.context_history[i]
-                            continue
-                        i += 1
+                    # Check if the last tool call resolved any pending failures
+                    conversation = ""
+                    for (ai_id, tool_id) in self.pending_failed_tool_calls:
+                        if ai_id in self.context_history:
+                            conversation += f"AI:\n{self.context_history[ai_id]['compressed_content']}\n"
+                            # Include tool call details as well
+                            if self.context_history[ai_id].get("metadata", {}).get("tool_call"):
+                                tool_call = self.context_history[ai_id]["metadata"]["tool_call"]
+                                conversation += f"\n{self._tool_string(tool_call)}\n"
+                        if tool_id in self.context_history:
+                            conversation += f"Tool Response:\n{self.context_history[tool_id]['original_content']}\n"
                     
-                    # Clear the pending failed tool calls
-                    self.pending_failed_tool_calls.clear()
+                    # Add current tool response and its corresponding ai message to the conversation
+                    conversation += f"AI:\n{last_ai_message['compressed_content']}\n"
+                    # Include tool call details as well
+                    if last_ai_message.get("metadata", {}).get("tool_call"):
+                        tool_call = last_ai_message["metadata"]["tool_call"]
+                        conversation += f"\n{self._tool_string(tool_call)}\n"
+                    conversation += f"Tool Response:\n{original_content}\n"
+                    
+                    # Check if the goal was achieved
+                    if self._is_goal_achieved(conversation):
+                        # Remove all pending failures without removing first ai message.
+                        to_delete_ids = []
+                        for i, (ai_id, tool_id) in enumerate(self.pending_failed_tool_calls):
+                            if i != 0: # Skip the first ai message
+                                to_delete_ids.append(ai_id)
+                            to_delete_ids.append(tool_id)
                         
-        self.context_history.append(new_message)
+                        # Remove all messages with IDs in to_delete_ids
+                        for id in to_delete_ids:
+                            if id in self.context_history:
+                                del self.context_history[id]
+                        
+                        # Clear the pending failed tool calls
+                        self.pending_failed_tool_calls.clear()
+                    else:
+                        self.pending_failed_tool_calls.append((last_ai_message["id"], msg_id))
+                        
+        self.context_history[msg_id] = new_message
         # Update token counts
         self.uncompressed_tokens += len(original_content.split())
         self.compressed_tokens += len(new_message["compressed_content"].split())
+        # Update the last message ID
+        self._last_message_id = msg_id
 
     def _tool_string(self, tool_call: dict) -> str:
         """Formats a tool call for display."""
@@ -133,7 +185,7 @@ class ContextManager:
     def get_context(self) -> str:
         """Constructs the final context string from the processed history."""
         full_context = []
-        for msg in self.context_history:
+        for msg_id, msg in self.context_history.items(): # In Python 3.7 and later, this iteration preserves the insertion order of the key-value pairs.
             # Simple formatting, can be customized for specific models
             role = msg['type'].capitalize()
             if role == "Ai": role = "Assistant"

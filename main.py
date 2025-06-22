@@ -31,4 +31,5 @@ if __name__=="__main__":
     invoke_agent(args.task, args.wd)
 
     # # For debugging purposes
-    # invoke_agent("Create a python simulation of big bang. Also add slider to control speed of simulation.", "temp")
+    # # invoke_agent("Create a python simulation of big bang. Also add slider to control speed of simulation.", "temp")
+    # invoke_agent("Create a game of life using python.", "temp")

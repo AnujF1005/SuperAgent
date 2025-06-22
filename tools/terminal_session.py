@@ -93,9 +93,10 @@ class TerminalSession:
         found_end = False
 
         last_pane_dump = ""
+        is_interrupted = False
 
-        try:
-            while waited < max_wait:
+        while waited < max_wait:
+            try:
                 pane_capture = subprocess.run(
                     f"tmux capture-pane -t {self.pane_id} -p -S -500 -J",
                     shell=True, capture_output=True, text=True
@@ -105,6 +106,10 @@ class TerminalSession:
 
                 pane = pane.replace(f"echo {end_marker}", "")
 
+                if is_interrupted:
+                    # Trick to get command output even if interrupted
+                    pane += f"\n{end_marker}"
+
                 if start_marker in pane and end_marker in pane:
                     start_idx = pane.rfind(start_marker) + len(start_marker)
                     end_idx = pane.rfind(end_marker)
@@ -113,11 +118,14 @@ class TerminalSession:
                     break
                 time.sleep(poll_interval)
                 waited += poll_interval
-        except KeyboardInterrupt:
-            print("[SuperAgent] Command capture interrupted by user.")
-        except Exception as e:
-            print(f"[SuperAgent] WARNING: Error capturing tmux pane output: {e}")
-            output = f"[SuperAgent] ERROR: Failed to capture command output due to an error: {e}"
+            except KeyboardInterrupt:
+                print("[SuperAgent] Command capture interrupted by user.")
+                is_interrupted = True
+                continue
+            except Exception as e:
+                print(f"[SuperAgent] WARNING: Error capturing tmux pane output: {e}")
+                output = f"[SuperAgent] ERROR: Failed to capture command output due to an error: {e}"
+                break
 
         # If still not found, dump log to disk for diagnosis:
         if not found_end:
