@@ -103,3 +103,6 @@ Contributions are welcome! Please feel free to submit pull requests.
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
+## Acknowledgement
+
+- Inspired from Cline (https://github.com/cline/cline)
