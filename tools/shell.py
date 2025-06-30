@@ -34,7 +34,11 @@ class ShellTool:
         if requires_approval.lower() == "true":
             ip = input(f"Approval required (y/n) for executing following command:\n{command}\n>> ")
             if ip.lower() == "n":
-                return f"User denied request to exeute command: {command}"
+                ip = input(f"Reason for denial (optional): ")
+                if ip.strip():
+                    return f"User denied request to execute command: {command} with reason: {ip}"
+                else:
+                    return f"User denied request to execute command: {command}"
         if terminal_session is None:
             return "[SuperAgent] ERROR: No terminal_session provided to ShellTool (this is a coding bug)."
 

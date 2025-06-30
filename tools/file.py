@@ -50,7 +50,7 @@ class WriteToFileTool:
         with open(path, 'w') as file:
             file.write(content)
         
-        return "File written successfully. Updated file content:\n" + content
+        return f"New file created: {path} and written successfully." # No need to return the content, as it is already present in the context of the agent.
 
 class ReadFileTool:
     name = "read_file"
@@ -79,7 +79,7 @@ class ReadFileTool:
         if not os.path.exists(path):
             return f"File at path {path} does not exist"
         with open(path, 'r') as file:
-            return "File content:\n" + file.read()
+            return f"Content of file {path}:\n" + file.read()
 
 class ReplaceInFileTool:
     name = "replace_in_file"
@@ -88,10 +88,10 @@ class ReplaceInFileTool:
         "optional": []
     }
     description = """
-    Request to replace sections of content in an existing file using SEARCH/REPLACE blocks that define exact changes to specific parts of the file. This tool should be used when you need to make targeted changes to specific parts of a file.
+    Request to replace sections of content in an existing file using SEARCH-REPLACE blocks that define exact changes to specific parts of the file. This tool should be used when you need to make targeted changes to specific parts of a file.
     Parameters:
     - path: (required) The path of the file to modify (relative to the current working directory)
-    - diff: (required) One or more SEARCH/REPLACE blocks following this exact format:
+    - diff: (required) One or more SEARCH-REPLACE blocks with ======= separating search and replace blocks, following this exact format:
     ```
     <<<<<<< SEARCH
     [exact content to find]
@@ -100,14 +100,15 @@ class ReplaceInFileTool:
     >>>>>>> REPLACE
     ```
     Critical rules:
+    1. Every SEARCH block should have a corresponding REPLACE block.
     1. SEARCH content must match the associated file section to find EXACTLY:
         * Match character-for-character including whitespace, indentation, line endings
         * Include all comments, docstrings, etc.
-    2. SEARCH/REPLACE blocks will ONLY replace the first match occurrence.
+    2. SEARCH-REPLACE blocks will ONLY replace the first match occurrence.
         * Including multiple unique SEARCH/REPLACE blocks if you need to make multiple changes.
         * Include *just* enough lines in each SEARCH section to uniquely match each set of lines that need to change.
         * When using multiple SEARCH/REPLACE blocks, list them in the order they appear in the file.
-    3. Keep SEARCH/REPLACE blocks concise.
+    3. Keep SEARCH-REPLACE blocks concise.
     4. Special operations: To delete code, use empty REPLACE section.
     Usage:
     <replace_in_file>
@@ -134,7 +135,6 @@ class ReplaceInFileTool:
     saveData();
     setLoading(false);
     }
-
     =======
     >>>>>>> REPLACE
     </diff>
@@ -149,28 +149,67 @@ class ReplaceInFileTool:
         # Normalize all newline types to \n for consistent regex matching
         processed_diff_str = diff_str.replace('\r\n', '\n').replace('\r', '\n')
 
+        # SEARCH and REPLACE tags should have atleast 4 brackets
+        SEARCH_TAG = '<<<< SEARCH\n'
+        REPLACE_TAG = '>>>> REPLACE'
+        SEPARATOR_TAG = '\n=======\n'
+
         changes = []
-        # Regex to find blocks:
-        # ^\s* : Start of line (due to re.MULTILINE), optional leading whitespace.
-        # <<<<<<< SEARCH : Delimiter keyword.
-        # \s*?\n : Optional trailing whitespace on delimiter line, then a mandatory newline.
-        # (.*?) : Captured group for search/replace content (non-greedy, re.DOTALL makes . match newlines).
-        # \n^\s*======= : Mandatory newline, then start of next delimiter line.
-        # \s*?\n(.*?)\n^\s*>>>>>>> REPLACE\s*?$ : Mandatory newline, then start of next delimiter line, then replace content, then end delimiter.
-        pattern = re.compile(
-            r"^\s*<<<<<<< SEARCH\s*?\n(.*?)\n^\s*=======\s*?\n(.*?)\n^\s*>>>>>>> REPLACE\s*?$",
-            re.DOTALL | re.MULTILINE
-        )
+        accumulator = ""
+        search_content = ""
+        replace_content = ""
+        search_start_index = -1
+        replace_start_index = -1
+
+        for i, char in enumerate(processed_diff_str):
+            accumulator += char
+            
+            # Check for the start of a SEARCH block
+            if accumulator.endswith(SEARCH_TAG):
+                search_content = ""
+                search_start_index = i + 1
+                continue
+            
+            # Check for the end of a SEARCH block
+            if accumulator.endswith(SEPARATOR_TAG):
+                if replace_start_index != -1:
+                    # If we were in a REPLACE block, store the previous change
+                    replace_content = accumulator[replace_start_index:i+1-len(SEPARATOR_TAG)]
+                    changes.append((search_content, replace_content))
+                    replace_content = ""
+                    replace_start_index = -1
+                
+                if search_start_index == -1:
+                    # If search block was not there at all, we will use whatever was accumulated so far
+                    search_start_index = 0
+                search_content = accumulator[search_start_index:i+1-len(SEPARATOR_TAG)]
+                replace_content = ""
+                replace_start_index = i + 1
+                continue
+            
+            # Check for the end of a REPLACE block
+            if accumulator.endswith(REPLACE_TAG):
+                # get index of the last \n
+                rindex = accumulator.rfind('\n')
+                # Store the completed change block
+                replace_content = accumulator[replace_start_index:rindex]
+                changes.append((search_content, replace_content))
+                search_content = ""
+                search_start_index = -1
+                replace_content = ""
+                replace_start_index = -1
+                continue
         
-        for match in pattern.finditer(processed_diff_str):
-            search_content = match.group(1)
-            replace_content = match.group(2)
+        if replace_start_index != -1:
+            # If we reach the end of the diff without closing a REPLACE block, we use whatever is left in the accumulator as the replace content
+            replace_content = accumulator[replace_start_index:]
             changes.append((search_content, replace_content))
         
         return changes
 
     def _line_trimmed_fallback_match(self, original_content: str, search_content: str, start_index: int) -> tuple[int, int] | None:
         """
+        -- NOT USED --
         Attempts a line-trimmed fallback match for the given search content in the original content.
         It tries to match `search_content` lines against a block of lines in `original_content` starting
         from `start_index`. Lines are matched by trimming leading/trailing whitespace and ensuring
@@ -228,6 +267,7 @@ class ReplaceInFileTool:
 
     def _block_anchor_fallback_match(self, original_content: str, search_content: str, start_index: int) -> tuple[int, int] | None:
         """
+        -- NOT USED --
         Attempts to match blocks of code by using the first and last lines as anchors.
         This is a third-tier fallback strategy that helps match blocks where we can identify
         the correct location by matching the beginning and end, even if the exact content
@@ -367,7 +407,7 @@ class ReplaceInFileTool:
             try:
                 with open(path, 'w', encoding='utf-8') as file:
                     file.write(modified_content)
-                return modified_content
+                return f"File {path} updated successfully with {applied_count} change(s) applied out of {num_changes_requested} requested. Content has been modified."
             except Exception as e:
                 return f"ERROR: Error writing updated content to file {path}: {str(e)}. In-memory changes were not saved."
         else: 

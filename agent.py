@@ -2,6 +2,7 @@ from response_parser import ContentType, parse_ai_response
 from tools import TOOLS_DICT
 from tools.terminal_session import TerminalSession
 from prompt import PromptManager
+from context_manager.context_manager import ContextManager
 import os
 
 class Agent:
@@ -23,6 +24,10 @@ class Agent:
             self.tool_instances[name] = ToolClass()
 
         os.chdir(self.working_directory)
+
+        self.ctxt_manager = ContextManager(
+            llm=self.llm
+        )
     
     def cleanup(self):
         if self.terminal_session:
@@ -69,55 +74,90 @@ class Agent:
     def invoke(self, query: str):
         if query.strip() == "":
             return
-        print(f"User: {query}")
+        # print(f"User: {query}")
 
         prompt = self.prompt_manager.get_prompt(self.history)
-        prompt += query
+        self.ctxt_manager.add_message({
+            "type": "system",
+            "content": prompt
+        })
+        self.ctxt_manager.add_message({
+            "type": "user",
+            "content": query
+        })
 
-        self.history.append(prompt)
+        print(f"\n >>> USER:\n{query}\n")
 
-        while True:
-            response = self.llm.invoke(prompt)
-            response = response.content
-            print(f"AI: {response}")
-            self.history.append(response)
+        try:
+            while True:
+                current_context = self.ctxt_manager.get_context()
+                response = self.llm.invoke(current_context)
+                response = response.content
+                print(f"\n >>> AGENT:\n{response}\n")
+                tool_calls = []
+                text_content = ""
 
-            content_blocks = parse_ai_response(response)
+                content_blocks = parse_ai_response(response)
 
-            tool_response = ""
-            is_tool_invoked = False
-            is_task_completed = False
-            for content_block in content_blocks:
-                if content_block["type"] == ContentType.TOOL_CALL:
-                    if not is_tool_invoked:
-                        is_tool_invoked = True
-                        tool_response += "Result of tool invocation:\n\n"
+                tool_response = ""
+                is_tool_invoked = False
+                is_task_completed = False
+                for content_block in content_blocks:
+                    if content_block["type"] == ContentType.TOOL_CALL:
+                        tool_calls.append({
+                            "tool_name": content_block["tool"],
+                            "args": content_block["params"]
+                        })
+                        if not is_tool_invoked:
+                            is_tool_invoked = True
+                            # tool_response += "Result of tool invocation:\n\n"
 
-                    if content_block["tool"] == "attempt_completion":
-                        tr = self.invoke_tool(content_block)
-                        if type(tr) == dict:
-                            if tr["user_satisfied"]:
-                                is_task_completed = True
-                            tool_response += tr["content"] + "\n\n"
+                        if content_block["tool"] == "attempt_completion":
+                            tr = self.invoke_tool(content_block)
+                            if type(tr) == dict:
+                                if tr["user_satisfied"]:
+                                    is_task_completed = True
+                                tool_response += tr["content"] + "\n\n"
+                            else:
+                                tool_response += tr + "\n\n"
+                            break
                         else:
-                            tool_response += tr + "\n\n"
-                        break
-                    else:
-                        tool_response += self.invoke_tool(content_block) + "\n\n"
-            
-            # Empty tool_response
-            if "" == tool_response.strip():
-                print("Empty tool response!!!")
-                tool_response = input("User: ")
+                            tool_response += self.invoke_tool(content_block) + "\n\n"
+                    elif content_block["type"] == ContentType.TEXT_CHUNK:
+                        text_content += content_block["content"] + "\n\n"
+                
+                self.ctxt_manager.add_message({
+                    "type": "ai",
+                    "content": text_content.strip(),
+                    "tool_calls": tool_calls
+                })
 
-            print(f"Tool Response: {tool_response}")
-            self.history.append(tool_response)
-            prompt += "\n\n" + str(response) + "\n\n" + str(tool_response) + "\n\n"
-            
-            print("\n\n"+ "="*50 + "\n\n")
-            if is_task_completed:
-                print("Task completed!")
-                print("Exiting...")
-                self.cleanup() # Call cleanup before breaking
-                break
-            
+                # Empty tool_response
+                if "" == tool_response.strip():
+                    print(f"Agent: {response}\n")
+                    print("Empty tool response!!!")
+                    tool_response = input("User: ")
+                    self.ctxt_manager.add_message({
+                        "type": "user",
+                        "content": tool_response.strip()
+                    })
+                else:
+                    self.ctxt_manager.add_message({
+                        "type": "tool",
+                        "content": tool_response.strip()
+                    })
+
+                print(f"\n >>> TOOL RESPONSE:\n{tool_response}\n")
+
+                print(f"\n >>> CURRENT CONTEXT:\n{self.ctxt_manager.get_context()}\n")
+                
+                print("\n\n"+ "="*50 + "\n\n")
+                if is_task_completed:
+                    print("Task completed!")
+                    print("Exiting...")
+                    self.cleanup() # Call cleanup before breaking
+                    break
+        except KeyboardInterrupt:
+            print("\n\nKeyboardInterrupt detected. Exiting gracefully...")
+            self.cleanup()
+            self.ctxt_manager.print_status()
