@@ -1,5 +1,6 @@
 from agent import Agent
 from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from dotenv import load_dotenv
 import argparse
 import os
@@ -9,6 +10,7 @@ load_dotenv("../.env")
 def invoke_agent(task, working_dir):
     
     llm = ChatOpenAI(model="gpt-4o-mini")
+    llm = ChatGoogleGenerativeAI(temperature=0, model="gemini-2.5-flash")
 
     ag = Agent(
         llm,

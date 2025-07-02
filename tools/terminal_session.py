@@ -6,6 +6,8 @@ import uuid
 import sys
 import platform
 
+MAX_OUTPUT_LINES_LIMIT = 500
+
 class TerminalSession:
     def __init__(self, working_directory):
         self.session_name = f"superagent_{os.getpid()}_{uuid.uuid4().hex[:8]}"
@@ -136,8 +138,9 @@ class TerminalSession:
             except Exception as e:
                 pass
             output = f"[SuperAgent] ERROR: Timeout waiting for command output or marker.\nSee {debug_path} for diagnostic dump."
-
-        return output
+        
+        # Only send last MAX_OUTPUT_LINES_LIMIT lines
+        return "\n".join(output.split("\n")[-MAX_OUTPUT_LINES_LIMIT:])
 
     def cleanup(self):
         # Terminate the launched terminal process if it exists

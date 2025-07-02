@@ -84,38 +84,31 @@ class ReadFileTool:
 class ReplaceInFileTool:
     name = "replace_in_file"
     params = {
-        "required": ["path", "diff"],
+        "required": ["path", "search_block", "replace_block"],
         "optional": []
     }
     description = """
-    Request to replace sections of content in an existing file using SEARCH-REPLACE blocks that define exact changes to specific parts of the file. This tool should be used when you need to make targeted changes to specific parts of a file.
+    Request to replace sections of content in an existing file using SEARCH and REPLACE blocks that define exact changes to specific parts of the file. This tool should be used when you need to make targeted changes to specific parts of a file.
     Parameters:
     - path: (required) The path of the file to modify (relative to the current working directory)
-    - diff: (required) One or more SEARCH-REPLACE blocks with ======= separating search and replace blocks, following this exact format:
-    ```
-    <<<<<<< SEARCH
-    [exact content to find]
-    =======
-    [new content to replace with]
-    >>>>>>> REPLACE
-    ```
+    - search_block: (required) Exact block content to be replaced from the file.
+    - replace_block: (required) New content to replace with.
+
     Critical rules:
-    1. Every SEARCH block should have a corresponding REPLACE block.
-    1. SEARCH content must match the associated file section to find EXACTLY:
+    1. search_block must match the associated file section to find EXACTLY:
         * Match character-for-character including whitespace, indentation, line endings
         * Include all comments, docstrings, etc.
-    2. SEARCH-REPLACE blocks will ONLY replace the first match occurrence.
-        * Including multiple unique SEARCH/REPLACE blocks if you need to make multiple changes.
+    2. This tool will ONLY replace the first match occurrence.
+        * Call this tool multiple times if you need to make multiple changes.
         * Include *just* enough lines in each SEARCH section to uniquely match each set of lines that need to change.
-        * When using multiple SEARCH/REPLACE blocks, list them in the order they appear in the file.
-    3. Keep SEARCH-REPLACE blocks concise.
-    4. Special operations: To delete code, use empty REPLACE section.
+    3. Keep search_block and replace_block concise.
+    4. Don't add any newline (`\n`) or extra space (` `) at start or end of search_block and replace_block if it is not supposed to be part of the current or updated file.
+    4. Special operations: To delete code, use empty replace_block.
     Usage:
     <replace_in_file>
     <path>File path here</path>
-    <diff>
-    Search and replace blocks here
-    </diff>
+    <search_block>Content to be replace with</search_block>
+    <replace_block>New content here</replace_block>
     </replace_in_file>
     """
     examples = """
@@ -123,213 +116,27 @@ class ReplaceInFileTool:
 
     <replace_in_file>
     <path>src/components/App.py</path>
-    <diff>
-    <<<<<<< SEARCH
-    import os
-    =======
-    import subprocess
-    >>>>>>> REPLACE
+    <search_block>import os</search_block>
+    <replace_block>import subprocess</replace_block>
+    </replace_in_file>
 
-    <<<<<<< SEARCH
-    def handleSubmit() {
+    <replace_in_file>
+    <search_block>def handleSubmit() {
     saveData();
     setLoading(false);
-    }
-    =======
-    >>>>>>> REPLACE
-    </diff>
+    }</search_block>
+    <replace_block></replace_block>
     </replace_in_file>
     """
 
-    def _parse_diff_blocks(self, diff_str: str) -> list[tuple[str, str]]:
-        """
-        Parses the diff string into a list of (search_pattern, replacement_text) tuples.
-        Handles escaped newlines and normalizes newline conventions.
-        """
-        # Normalize all newline types to \n for consistent regex matching
-        processed_diff_str = diff_str.replace('\r\n', '\n').replace('\r', '\n')
-
-        # SEARCH and REPLACE tags should have atleast 4 brackets
-        SEARCH_TAG = '<<<< SEARCH\n'
-        REPLACE_TAG = '>>>> REPLACE'
-        SEPARATOR_TAG = '\n=======\n'
-
-        changes = []
-        accumulator = ""
-        search_content = ""
-        replace_content = ""
-        search_start_index = -1
-        replace_start_index = -1
-
-        for i, char in enumerate(processed_diff_str):
-            accumulator += char
-            
-            # Check for the start of a SEARCH block
-            if accumulator.endswith(SEARCH_TAG):
-                search_content = ""
-                search_start_index = i + 1
-                continue
-            
-            # Check for the end of a SEARCH block
-            if accumulator.endswith(SEPARATOR_TAG):
-                if replace_start_index != -1:
-                    # If we were in a REPLACE block, store the previous change
-                    replace_content = accumulator[replace_start_index:i+1-len(SEPARATOR_TAG)]
-                    changes.append((search_content, replace_content))
-                    replace_content = ""
-                    replace_start_index = -1
-                
-                if search_start_index == -1:
-                    # If search block was not there at all, we will use whatever was accumulated so far
-                    search_start_index = 0
-                search_content = accumulator[search_start_index:i+1-len(SEPARATOR_TAG)]
-                replace_content = ""
-                replace_start_index = i + 1
-                continue
-            
-            # Check for the end of a REPLACE block
-            if accumulator.endswith(REPLACE_TAG):
-                # get index of the last \n
-                rindex = accumulator.rfind('\n')
-                # Store the completed change block
-                replace_content = accumulator[replace_start_index:rindex]
-                changes.append((search_content, replace_content))
-                search_content = ""
-                search_start_index = -1
-                replace_content = ""
-                replace_start_index = -1
-                continue
-        
-        if replace_start_index != -1:
-            # If we reach the end of the diff without closing a REPLACE block, we use whatever is left in the accumulator as the replace content
-            replace_content = accumulator[replace_start_index:]
-            changes.append((search_content, replace_content))
-        
-        return changes
-
-    def _line_trimmed_fallback_match(self, original_content: str, search_content: str, start_index: int) -> tuple[int, int] | None:
-        """
-        -- NOT USED --
-        Attempts a line-trimmed fallback match for the given search content in the original content.
-        It tries to match `search_content` lines against a block of lines in `original_content` starting
-        from `start_index`. Lines are matched by trimming leading/trailing whitespace and ensuring
-        they are identical afterwards.
-        Returns [matchIndexStart, matchIndexEnd] if found, or None if not found.
-        """
-        original_lines = original_content.split("\n")
-        search_lines = search_content.split("\n")
-
-        # Trim trailing empty line if exists (from the trailing \n in search_content)
-        if search_lines and search_lines[-1] == "":
-            search_lines.pop()
-
-        if not search_lines: # Handle empty search content for line-trimmed match
-            return None
-
-        # Find the line number where start_index falls
-        start_line_num = 0
-        current_char_index = 0
-        while current_char_index < start_index and start_line_num < len(original_lines):
-            current_char_index += len(original_lines[start_line_num]) + 1 # +1 for \n
-            start_line_num += 1
-
-        # For each possible starting position in original content
-        for i in range(start_line_num, len(original_lines) - len(search_lines) + 1):
-            matches = True
-            # Try to match all search lines from this position
-            for j in range(len(search_lines)):
-                original_trimmed = original_lines[i + j].strip()
-                search_trimmed = search_lines[j].strip()
-
-                if original_trimmed != search_trimmed:
-                    matches = False
-                    break
-            
-            # If we found a match, calculate the exact character positions
-            if matches:
-                # Find start character index
-                match_start_index = 0
-                for k in range(i):
-                    match_start_index += len(original_lines[k]) + 1 # +1 for \n
-
-                # Find end character index
-                match_end_index = match_start_index
-                for k in range(len(search_lines)):
-                    match_end_index += len(original_lines[i + k]) + 1 # +1 for \n
-                
-                # Adjust match_end_index if the last line of original_content doesn't end with a newline
-                # This is important for accurate slicing
-                if i + len(search_lines) == len(original_lines) and not original_content.endswith('\n'):
-                    match_end_index -= 1 # Remove the extra +1 for the non-existent newline
-
-                return [match_start_index, match_end_index]
-        return None
-
-    def _block_anchor_fallback_match(self, original_content: str, search_content: str, start_index: int) -> tuple[int, int] | None:
-        """
-        -- NOT USED --
-        Attempts to match blocks of code by using the first and last lines as anchors.
-        This is a third-tier fallback strategy that helps match blocks where we can identify
-        the correct location by matching the beginning and end, even if the exact content
-        differs slightly.
-        """
-        original_lines = original_content.split("\n")
-        search_lines = search_content.split("\n")
-
-        # Only use this approach for blocks of 3+ lines
-        if len(search_lines) < 3:
-            return None
-
-        # Trim trailing empty line if exists
-        if search_lines and search_lines[-1] == "":
-            search_lines.pop()
-        
-        if not search_lines: # Handle empty search content after pop
-            return None
-
-        first_line_search = search_lines[0].strip()
-        last_line_search = search_lines[-1].strip()
-        search_block_size = len(search_lines)
-
-        # Find the line number where start_index falls
-        start_line_num = 0
-        current_char_index = 0
-        while current_char_index < start_index and start_line_num < len(original_lines):
-            current_char_index += len(original_lines[start_line_num]) + 1
-            start_line_num += 1
-
-        # Look for matching start and end anchors
-        for i in range(start_line_num, len(original_lines) - search_block_size + 1):
-            # Check if first line matches
-            if original_lines[i].strip() != first_line_search:
-                continue
-
-            # Check if last line matches at the expected position
-            if original_lines[i + search_block_size - 1].strip() != last_line_search:
-                continue
-
-            # Calculate exact character positions
-            match_start_index = 0
-            for k in range(i):
-                match_start_index += len(original_lines[k]) + 1
-
-            match_end_index = match_start_index
-            for k in range(search_block_size):
-                match_end_index += len(original_lines[i + k]) + 1
-            
-            # Adjust match_end_index if the last line of original_content doesn't end with a newline
-            if i + search_block_size == len(original_lines) and not original_content.endswith('\n'):
-                match_end_index -= 1
-
-            return [match_start_index, match_end_index]
-        return None
-
-    def __call__(self, path: str, diff: str) -> str:
+    def __call__(self, path: str, search_block: str, replace_block: str) -> str:
         # --- 1. Input Validation ---
         if not path or not isinstance(path, str):
             return f"ERROR: Path parameter is missing or invalid. Path provided: '{str(path)}'."
-        if not isinstance(diff, str): # Diff must be a string, even if empty
-            return f"ERROR: Diff parameter must be a string. Path: '{path}'."
+        if not isinstance(search_block, str): # search_block must be a string, even if empty
+            return f"ERROR: search_block parameter must be a string. Path: '{path}'."
+        if not isinstance(replace_block, str): # replace_block must be a string, even if empty
+            return f"ERROR: replace_block parameter must be a string. Path: '{path}'."
 
         # --- 2. File System Checks ---
         if not os.path.exists(path):
@@ -345,74 +152,34 @@ class ReplaceInFileTool:
             return f"ERROR: Error reading file {path}: {str(e)}"
 
         # --- 4. Handle Empty/Whitespace-Only Diff ---
-        if not diff.strip():
-            return original_content 
-
-        # --- 5. Parse Diff ---
-        changes_list: list[tuple[str, str]] = []
-        try:
-            changes_list = self._parse_diff_blocks(diff)
-        except Exception as e: 
-            return f"ERROR: Critical error parsing diff blocks for file {path}: {str(e)}"
-
-        if not changes_list: 
-            return (f"ERROR: No valid SEARCH/REPLACE blocks found in the provided diff for file {path}. "
-                    f"File content has not been modified. Ensure diff format is correct and newlines are properly represented. "
-                    f"Input diff (first 100 chars): '{diff[:100]}'")
-            
-        num_changes_requested = len(changes_list)
-        modified_content = original_content
-        applied_count = 0
-        last_processed_index = 0 # Keep track of the last processed character index in the original content
+        if not search_block.strip():
+            return f"search block is empty, so no modifications made to file {path}"
 
         # --- 6. Apply Changes ---
-        for search_code, update_code in changes_list:
-            match_start_index = -1
-            match_end_index = -1
+        match_start_index = -1
+        match_end_index = -1
 
-            # Attempt 1: Exact match
-            exact_index = modified_content.find(search_code, last_processed_index)
-            if exact_index != -1:
-                match_start_index = exact_index
-                match_end_index = exact_index + len(search_code)
-            else:
-                # Attempt 2: Line-trimmed fallback match
-                line_match = self._line_trimmed_fallback_match(modified_content, search_code, last_processed_index)
-                if line_match:
-                    match_start_index, match_end_index = line_match
-                else:
-                    # Attempt 3: Block anchor fallback match
-                    block_match = self._block_anchor_fallback_match(modified_content, search_code, last_processed_index)
-                    if block_match:
-                        match_start_index, match_end_index = block_match
-            
-            if match_start_index != -1:
-                # Reconstruct the content with the replacement
-                modified_content = (
-                    modified_content[:match_start_index] +
-                    update_code +
-                    modified_content[match_end_index:]
-                )
-                applied_count += 1
-                # Update last_processed_index for the next search
-                # This is crucial for sequential replacements
-                last_processed_index = match_start_index + len(update_code)
-            else:
-                # If no match found for a block, it's an error or warning
-                # For now, we'll just report it and continue, but a more robust system might stop or ask for clarification.
-                print(f"WARNING: SEARCH block did not find a match in file {path} starting from index {last_processed_index}. Search content (first 100 chars): '{search_code[:100]}'")
+        # Attempt 1: Exact match
+        exact_index = original_content.find(search_block)
+        if exact_index != -1:
+            match_start_index = exact_index
+            match_end_index = exact_index + len(search_block)
+        
+        if match_start_index != -1:
+            # Reconstruct the content with the replacement
+            modified_content = (
+                original_content[:match_start_index] +
+                replace_block +
+                original_content[match_end_index:]
+            )
+        else:
+            # If no match found for a search_block, it's an error
+            return f"ERROR: search_block did not find a match in file {path}"
 
         # --- 7. Process Results and Write File if Changed ---
-        if applied_count > 0: 
-            try:
-                with open(path, 'w', encoding='utf-8') as file:
-                    file.write(modified_content)
-                return f"File {path} updated successfully with {applied_count} change(s) applied out of {num_changes_requested} requested. Content has been modified."
-            except Exception as e:
-                return f"ERROR: Error writing updated content to file {path}: {str(e)}. In-memory changes were not saved."
-        else: 
-            return (f"NO_CHANGE_APPLIED: Although {num_changes_requested} change block(s) were provided, "
-                    f"no textual changes were made to file '{path}'. "
-                    "This could be due to no SEARCH patterns matching, or because all "
-                    "REPLACE contents were identical to their corresponding SEARCH contents. "
-                    "File content remains unchanged.")
+        try:
+            with open(path, 'w', encoding='utf-8') as file:
+                file.write(modified_content)
+            return f"File {path} updated successfully."
+        except Exception as e:
+            return f"ERROR: Error writing updated content to file {path}: {str(e)}. In-memory changes were not saved."

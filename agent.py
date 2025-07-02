@@ -92,6 +92,13 @@ class Agent:
             while True:
                 current_context = self.ctxt_manager.get_context()
                 response = self.llm.invoke(current_context)
+                print("=== >>> USAGE <<< ===")
+                print(f"Input tokens:  {response.usage_metadata['input_tokens']}")
+                print(f"Output tokens: {response.usage_metadata['output_tokens']}")
+                print(f"Total tokens:  {response.usage_metadata['total_tokens']}")
+                print(f"Cache Read:    {response.usage_metadata['input_token_details']['cache_read']}")
+                print(f"Reasoning:     {response.usage_metadata['output_token_details']['reasoning']}")
+                print("=== >>> ===== <<< ===")
                 response = response.content
                 print(f"\n >>> AGENT:\n{response}\n")
                 tool_calls = []
