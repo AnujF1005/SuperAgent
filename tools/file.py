@@ -1,6 +1,8 @@
 import os
 import re
 
+MAX_READ_FILE_LINES_LIMIT = 2000
+
 class WriteToFileTool:
     name = "write_to_file"
     params = {
@@ -56,30 +58,81 @@ class ReadFileTool:
     name = "read_file"
     params = {
         "required": ["path"],
-        "optional": []
+        "optional": ["start_line_index", "lines_to_read"]
     }
     description = """
     Request to read the contents of a file at the specified path. Use this when you need to examine the contents of an existing file you do not know the contents of, for example to analyze code, review text files, or extract information from configuration files. Automatically extracts raw text from PDF and DOCX files. May not be suitable for other types of binary files, as it returns the raw content as a string.
+    Optionally you can also provide start line index from where to start reading the file and number of lines to read. NOTE: this tool can't read more than 2000 lines at once from a file.
     Parameters:
     - path: (required) The path of the file to read (relative to the current working directory)
+    - start_line_index: (optional) (int) line index to start reading file from.
+    - lines_to_read: (optional) (int) number of lines to read from start_line_index. If not mentioned, all lines will be read from file.
     Usage:
     <read_file>
     <path>File path here</path>
     </read_file>
     """
     examples = """
-    Requesting to read a file src/main.py
+    Requesting to read a whole file src/main.py
 
     <read_file>
     <path>src/main.py</path>
     </read_file>
-    """
 
-    def __call__(self, path: str):
+    Requesting to read a file src/data.py from line index 3000 and read 100 lines
+    <read_file>
+    <path>src/data.py</path>
+    <start_line_index>3000</start_line_index>
+    <lines_to_read>100</lines_to_read>
+    </read_file>
+    """
+    def _parse_inputs(self, input_dict: dict):
+        input_dict['start_line_index'] = int(input_dict.get('start_line_index', 0))
+        input_dict['lines_to_read'] = int(input_dict.get('lines_to_read', -1))
+        return input_dict
+
+    def __call__(self, **kwargs):
+        """
+        Arguments expected in kwargs:
+        - path: (required) The path of the file to read (relative to the current working directory)
+        - start_line_index: (optional) (int) line index to start reading file from.
+        - lines_to_read: (optional) (int) number of lines to read from start_line_index. If not mentioned, all lines will be read from file.
+        """
+        # Parse inputs
+        parsed_inputs = self._parse_inputs(kwargs)
+
+        path = parsed_inputs["path"]
+        start_line_index = parsed_inputs.get("start_line_index", 0)
+        lines_to_read = parsed_inputs.get("lines_to_read", -1)
+        
         if not os.path.exists(path):
             return f"File at path {path} does not exist"
+        
+        if start_line_index < 0:
+            return f"ERROR: Negative start_line_index"
+
+        file_content = ""
         with open(path, 'r') as file:
-            return f"Content of file {path}:\n" + file.read()
+            file_content = file.read()
+
+        lines = file_content.split('\n')
+
+        if start_line_index > 0:
+            lines = lines[start_line_index:]
+
+        if lines_to_read > 0:
+            lines = lines[:lines_to_read]
+
+        total_lines = len(lines)
+
+        if total_lines > MAX_READ_FILE_LINES_LIMIT:
+            lines = lines[:MAX_READ_FILE_LINES_LIMIT]
+        
+        file_content = '\n'.join(lines)
+        if total_lines > MAX_READ_FILE_LINES_LIMIT:
+            file_content += " ... (truncated)"
+
+        return f"Content of file {path}:\n" + file_content
 
 class ReplaceInFileTool:
     name = "replace_in_file"
