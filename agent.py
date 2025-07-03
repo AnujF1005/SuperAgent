@@ -156,7 +156,7 @@ class Agent:
 
                 print(f"\n >>> TOOL RESPONSE:\n{tool_response}\n")
 
-                print(f"\n >>> CURRENT CONTEXT:\n{self.ctxt_manager.get_context()}\n")
+                # print(f"\n >>> CURRENT CONTEXT:\n{self.ctxt_manager.get_context()}\n")
                 
                 print("\n\n"+ "="*50 + "\n\n")
                 if is_task_completed:
