@@ -124,6 +124,7 @@ class GrepTool:
     """
 
     def __call__(self, path: str, pattern: str, include: str = None):
+        # TODO: Ignore global ignore patterns e.g. .gitignore. Also use robust methods such as used by Gemini CLI.
         # Ensure directory exists
         if not os.path.exists(path):
             return f"Error: Directory at path '{path}' does not exist."
