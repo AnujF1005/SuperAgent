@@ -11,6 +11,7 @@ def invoke_agent(task, working_dir):
     
     llm = ChatOpenAI(model="gpt-4o-mini")
     llm = ChatGoogleGenerativeAI(temperature=0, model="gemini-2.5-flash")
+    llm = ChatGoogleGenerativeAI(temperature=0, model="gemini-2.5-flash-lite-preview-06-17")
 
     ag = Agent(
         llm,
